@@ -1,21 +1,17 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Repositories\Eloquent;
 
 use Pterodactyl\Models\Allocation;
+use Illuminate\Database\Eloquent\Builder;
 use Pterodactyl\Contracts\Repository\AllocationRepositoryInterface;
 
 class AllocationRepository extends EloquentRepository implements AllocationRepositoryInterface
 {
     /**
-     * {@inheritdoc}
+     * Return the model backing this repository.
+     *
+     * @return string
      */
     public function model()
     {
@@ -23,18 +19,94 @@ class AllocationRepository extends EloquentRepository implements AllocationRepos
     }
 
     /**
-     * {@inheritdoc}
+     * Return all of the allocations that exist for a node that are not currently
+     * allocated.
+     *
+     * @param int $node
+     * @return array
      */
-    public function assignAllocationsToServer($server, array $ids)
+    public function getUnassignedAllocationIds(int $node): array
     {
-        return $this->getBuilder()->whereIn('id', $ids)->update(['server_id' => $server]);
+        return Allocation::query()->select('id')
+            ->whereNull('server_id')
+            ->where('node_id', $node)
+            ->get()
+            ->pluck('id')
+            ->toArray();
     }
 
     /**
-     * {@inheritdoc}
+     * Return a concatenated result set of node ips that already have at least one
+     * server assigned to that IP. This allows for filtering out sets for
+     * dedicated allocation IPs.
+     *
+     * If an array of nodes is passed the results will be limited to allocations
+     * in those nodes.
+     *
+     * @param array $nodes
+     * @return array
      */
-    public function getAllocationsForNode($node)
+    protected function getDiscardableDedicatedAllocations(array $nodes = []): array
     {
-        return $this->getBuilder()->where('node_id', $node)->get();
+        $query = Allocation::query()->selectRaw('CONCAT_WS("-", node_id, ip) as result');
+
+        if (! empty($nodes)) {
+            $query->whereIn('node_id', $nodes);
+        }
+
+        return $query->whereNotNull('server_id')
+            ->groupByRaw('CONCAT(node_id, ip)')
+            ->get()
+            ->pluck('result')
+            ->toArray();
+    }
+
+    /**
+     * Return a single allocation from those meeting the requirements.
+     *
+     * @param array $nodes
+     * @param array $ports
+     * @param bool $dedicated
+     * @return \Pterodactyl\Models\Allocation|null
+     */
+    public function getRandomAllocation(array $nodes, array $ports, bool $dedicated = false)
+    {
+        $query = Allocation::query()->whereNull('server_id');
+
+        if (! empty($nodes)) {
+            $query->whereIn('node_id', $nodes);
+        }
+
+        if (! empty($ports)) {
+            $query->where(function (Builder $inner) use ($ports) {
+                $whereIn = [];
+                foreach ($ports as $port) {
+                    if (is_array($port)) {
+                        $inner->orWhereBetween('port', $port);
+                        continue;
+                    }
+
+                    $whereIn[] = $port;
+                }
+
+                if (! empty($whereIn)) {
+                    $inner->orWhereIn('port', $whereIn);
+                }
+            });
+        }
+
+        // If this allocation should not be shared with any other servers get
+        // the data and modify the query as necessary,
+        if ($dedicated) {
+            $discard = $this->getDiscardableDedicatedAllocations($nodes);
+
+            if (! empty($discard)) {
+                $query->whereNotIn(
+                    $this->getBuilder()->raw('CONCAT_WS("-", node_id, ip)'), $discard
+                );
+            }
+        }
+
+        return $query->inRandomOrder()->first();
     }
 }

@@ -31,7 +31,7 @@ class NestUpdateService
     /**
      * Update a nest and prevent changing the author once it is set.
      *
-     * @param int   $nest
+     * @param int $nest
      * @param array $data
      * @throws \Pterodactyl\Exceptions\Model\DataValidationException
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
@@ -42,6 +42,6 @@ class NestUpdateService
             unset($data['author']);
         }
 
-        $this->repository->withoutFresh()->update($nest, $data);
+        $this->repository->withoutFreshModel()->update($nest, $data);
     }
 }

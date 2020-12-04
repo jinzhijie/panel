@@ -1,21 +1,16 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Http\Controllers\Admin;
 
 use Illuminate\Http\Request;
 use Pterodactyl\Models\User;
 use Prologue\Alerts\AlertsMessageBag;
+use Spatie\QueryBuilder\QueryBuilder;
 use Pterodactyl\Exceptions\DisplayException;
 use Pterodactyl\Http\Controllers\Controller;
 use Illuminate\Contracts\Translation\Translator;
 use Pterodactyl\Services\Users\UserUpdateService;
+use Pterodactyl\Traits\Helpers\AvailableLanguages;
 use Pterodactyl\Services\Users\UserCreationService;
 use Pterodactyl\Services\Users\UserDeletionService;
 use Pterodactyl\Http\Requests\Admin\UserFormRequest;
@@ -23,6 +18,8 @@ use Pterodactyl\Contracts\Repository\UserRepositoryInterface;
 
 class UserController extends Controller
 {
+    use AvailableLanguages;
+
     /**
      * @var \Prologue\Alerts\AlertsMessageBag
      */
@@ -56,11 +53,11 @@ class UserController extends Controller
     /**
      * UserController constructor.
      *
-     * @param \Prologue\Alerts\AlertsMessageBag                         $alert
-     * @param \Pterodactyl\Services\Users\UserCreationService           $creationService
-     * @param \Pterodactyl\Services\Users\UserDeletionService           $deletionService
-     * @param \Illuminate\Contracts\Translation\Translator              $translator
-     * @param \Pterodactyl\Services\Users\UserUpdateService             $updateService
+     * @param \Prologue\Alerts\AlertsMessageBag $alert
+     * @param \Pterodactyl\Services\Users\UserCreationService $creationService
+     * @param \Pterodactyl\Services\Users\UserDeletionService $deletionService
+     * @param \Illuminate\Contracts\Translation\Translator $translator
+     * @param \Pterodactyl\Services\Users\UserUpdateService $updateService
      * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface $repository
      */
     public function __construct(
@@ -87,7 +84,17 @@ class UserController extends Controller
      */
     public function index(Request $request)
     {
-        $users = $this->repository->search($request->input('query'))->getAllUsersWithCounts();
+        $users = QueryBuilder::for(
+            User::query()->select('users.*')
+                ->selectRaw('COUNT(DISTINCT(subusers.id)) as subuser_of_count')
+                ->selectRaw('COUNT(DISTINCT(servers.id)) as servers_count')
+                ->leftJoin('subusers', 'subusers.user_id', '=', 'users.id')
+                ->leftJoin('servers', 'servers.owner_id', '=', 'users.id')
+                ->groupBy('users.id')
+        )
+            ->allowedFilters(['username', 'email', 'uuid'])
+            ->allowedSorts(['id', 'uuid'])
+            ->paginate(50);
 
         return view('admin.users.index', ['users' => $users]);
     }
@@ -99,7 +106,9 @@ class UserController extends Controller
      */
     public function create()
     {
-        return view('admin.users.new');
+        return view('admin.users.new', [
+            'languages' => $this->getAvailableLanguages(true),
+        ]);
     }
 
     /**
@@ -110,7 +119,10 @@ class UserController extends Controller
      */
     public function view(User $user)
     {
-        return view('admin.users.view', ['user' => $user]);
+        return view('admin.users.view', [
+            'user' => $user,
+            'languages' => $this->getAvailableLanguages(true),
+        ]);
     }
 
     /**
@@ -146,7 +158,7 @@ class UserController extends Controller
     public function store(UserFormRequest $request)
     {
         $user = $this->creationService->handle($request->normalize());
-        $this->alert->success($this->translator->trans('admin/user.notices.account_created'))->flash();
+        $this->alert->success($this->translator->get('admin/user.notices.account_created'))->flash();
 
         return redirect()->route('admin.users.view', $user->id);
     }
@@ -155,7 +167,7 @@ class UserController extends Controller
      * Update a user on the system.
      *
      * @param \Pterodactyl\Http\Requests\Admin\UserFormRequest $request
-     * @param \Pterodactyl\Models\User                         $user
+     * @param \Pterodactyl\Models\User $user
      * @return \Illuminate\Http\RedirectResponse
      *
      * @throws \Pterodactyl\Exceptions\Model\DataValidationException
@@ -163,8 +175,11 @@ class UserController extends Controller
      */
     public function update(UserFormRequest $request, User $user)
     {
-        $this->updateService->handle($user->id, $request->normalize());
-        $this->alert->success($this->translator->trans('admin/user.notices.account_updated'))->flash();
+        $this->updateService
+            ->setUserLevel(User::USER_LEVEL_ADMIN)
+            ->handle($user, $request->normalize());
+
+        $this->alert->success(trans('admin/user.notices.account_updated'))->flash();
 
         return redirect()->route('admin.users.view', $user->id);
     }
@@ -173,10 +188,24 @@ class UserController extends Controller
      * Get a JSON response of users on the system.
      *
      * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return \Illuminate\Support\Collection|\Pterodactyl\Models\Model
      */
     public function json(Request $request)
     {
-        return $this->repository->filterUsersByQuery($request->input('q'));
+        $users = QueryBuilder::for(User::query())->allowedFilters(['email'])->paginate(25);
+
+        // Handle single user requests.
+        if ($request->query('user_id')) {
+            $user = User::query()->findOrFail($request->input('user_id'));
+            $user->md5 = md5(strtolower($user->email));
+
+            return $user;
+        }
+
+        return $users->map(function ($item) {
+            $item->md5 = md5(strtolower($item->email));
+
+            return $item;
+        });
     }
 }

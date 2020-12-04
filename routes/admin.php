@@ -1,12 +1,27 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
-Route::get('/', 'BaseController@getIndex')->name('admin.index');
+
+use Illuminate\Support\Facades\Route;
+use Pterodactyl\Http\Middleware\Admin\Servers\ServerInstalled;
+
+Route::get('/', 'BaseController@index')->name('admin.index');
+Route::get('/statistics', 'StatisticsController@index')->name('admin.statistics');
+
+/*
+|--------------------------------------------------------------------------
+| Location Controller Routes
+|--------------------------------------------------------------------------
+|
+| Endpoint: /admin/api
+|
+*/
+Route::group(['prefix' => 'api'], function () {
+    Route::get('/', 'ApiController@index')->name('admin.api.index');
+    Route::get('/new', 'ApiController@create')->name('admin.api.new');
+
+    Route::post('/new', 'ApiController@store');
+
+    Route::delete('/revoke/{identifier}', 'ApiController@delete')->name('admin.api.delete');
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -50,9 +65,14 @@ Route::group(['prefix' => 'databases'], function () {
 |
 */
 Route::group(['prefix' => 'settings'], function () {
-    Route::get('/', 'BaseController@getSettings')->name('admin.settings');
+    Route::get('/', 'Settings\IndexController@index')->name('admin.settings');
+    Route::get('/mail', 'Settings\MailController@index')->name('admin.settings.mail');
+    Route::get('/mail/test', 'Settings\MailController@test')->name('admin.settings.mail.test');
+    Route::get('/advanced', 'Settings\AdvancedController@index')->name('admin.settings.advanced');
 
-    Route::post('/', 'BaseController@postSettings');
+    Route::patch('/', 'Settings\IndexController@update');
+    Route::patch('/mail', 'Settings\MailController@update');
+    Route::patch('/advanced', 'Settings\AdvancedController@update');
 });
 
 /*
@@ -84,30 +104,37 @@ Route::group(['prefix' => 'users'], function () {
 |
 */
 Route::group(['prefix' => 'servers'], function () {
-    Route::get('/', 'ServersController@index')->name('admin.servers');
-    Route::get('/new', 'ServersController@create')->name('admin.servers.new');
-    Route::get('/view/{server}', 'ServersController@viewIndex')->name('admin.servers.view');
-    Route::get('/view/{server}/details', 'ServersController@viewDetails')->name('admin.servers.view.details');
-    Route::get('/view/{server}/build', 'ServersController@viewBuild')->name('admin.servers.view.build');
-    Route::get('/view/{server}/startup', 'ServersController@viewStartup')->name('admin.servers.view.startup');
-    Route::get('/view/{server}/database', 'ServersController@viewDatabase')->name('admin.servers.view.database');
-    Route::get('/view/{server}/manage', 'ServersController@viewManage')->name('admin.servers.view.manage');
-    Route::get('/view/{server}/delete', 'ServersController@viewDelete')->name('admin.servers.view.delete');
+    Route::get('/', 'Servers\ServerController@index')->name('admin.servers');
+    Route::get('/new', 'Servers\CreateServerController@index')->name('admin.servers.new');
+    Route::get('/view/{server}', 'Servers\ServerViewController@index')->name('admin.servers.view');
 
-    Route::post('/new', 'ServersController@store');
+    Route::group(['middleware' => [ServerInstalled::class]], function () {
+        Route::get('/view/{server}/details', 'Servers\ServerViewController@details')->name('admin.servers.view.details');
+        Route::get('/view/{server}/build', 'Servers\ServerViewController@build')->name('admin.servers.view.build');
+        Route::get('/view/{server}/startup', 'Servers\ServerViewController@startup')->name('admin.servers.view.startup');
+        Route::get('/view/{server}/database', 'Servers\ServerViewController@database')->name('admin.servers.view.database');
+        Route::get('/view/{server}/mounts', 'Servers\ServerViewController@mounts')->name('admin.servers.view.mounts');
+    });
+
+    Route::get('/view/{server}/manage', 'Servers\ServerViewController@manage')->name('admin.servers.view.manage');
+    Route::get('/view/{server}/delete', 'Servers\ServerViewController@delete')->name('admin.servers.view.delete');
+
+    Route::post('/new', 'Servers\CreateServerController@store');
     Route::post('/view/{server}/build', 'ServersController@updateBuild');
     Route::post('/view/{server}/startup', 'ServersController@saveStartup');
     Route::post('/view/{server}/database', 'ServersController@newDatabase');
+    Route::post('/view/{server}/mounts/{mount}', 'ServersController@addMount')->name('admin.servers.view.mounts.toggle');
     Route::post('/view/{server}/manage/toggle', 'ServersController@toggleInstall')->name('admin.servers.view.manage.toggle');
-    Route::post('/view/{server}/manage/rebuild', 'ServersController@rebuildContainer')->name('admin.servers.view.manage.rebuild');
     Route::post('/view/{server}/manage/suspension', 'ServersController@manageSuspension')->name('admin.servers.view.manage.suspension');
     Route::post('/view/{server}/manage/reinstall', 'ServersController@reinstallServer')->name('admin.servers.view.manage.reinstall');
+    Route::post('/view/{server}/manage/transfer', 'Servers\ServerTransferController@transfer')->name('admin.servers.view.manage.transfer');
     Route::post('/view/{server}/delete', 'ServersController@delete');
 
     Route::patch('/view/{server}/details', 'ServersController@setDetails');
     Route::patch('/view/{server}/database', 'ServersController@resetDatabasePassword');
 
     Route::delete('/view/{server}/database/{database}/delete', 'ServersController@deleteDatabase')->name('admin.servers.view.database.delete');
+    Route::delete('/view/{server}/mounts/{mount}', 'ServersController@deleteMount');
 });
 
 /*
@@ -119,14 +146,15 @@ Route::group(['prefix' => 'servers'], function () {
 |
 */
 Route::group(['prefix' => 'nodes'], function () {
-    Route::get('/', 'NodesController@index')->name('admin.nodes');
+    Route::get('/', 'Nodes\NodeController@index')->name('admin.nodes');
     Route::get('/new', 'NodesController@create')->name('admin.nodes.new');
-    Route::get('/view/{node}', 'NodesController@viewIndex')->name('admin.nodes.view');
-    Route::get('/view/{node}/settings', 'NodesController@viewSettings')->name('admin.nodes.view.settings');
-    Route::get('/view/{node}/configuration', 'NodesController@viewConfiguration')->name('admin.nodes.view.configuration');
-    Route::get('/view/{node}/allocation', 'NodesController@viewAllocation')->name('admin.nodes.view.allocation');
-    Route::get('/view/{node}/servers', 'NodesController@viewServers')->name('admin.nodes.view.servers');
-    Route::get('/view/{node}/settings/token', 'NodesController@setToken')->name('admin.nodes.view.configuration.token');
+    Route::get('/view/{node}', 'Nodes\NodeViewController@index')->name('admin.nodes.view');
+    Route::get('/view/{node}/settings', 'Nodes\NodeViewController@settings')->name('admin.nodes.view.settings');
+    Route::get('/view/{node}/configuration', 'Nodes\NodeViewController@configuration')->name('admin.nodes.view.configuration');
+    Route::get('/view/{node}/allocation', 'Nodes\NodeViewController@allocations')->name('admin.nodes.view.allocation');
+    Route::get('/view/{node}/servers', 'Nodes\NodeViewController@servers')->name('admin.nodes.view.servers');
+    Route::get('/view/{node}/system-information', 'Nodes\SystemInformationController');
+    Route::get('/view/{node}/settings/token', 'NodeAutoDeployController')->name('admin.nodes.view.configuration.token');
 
     Route::post('/new', 'NodesController@store');
     Route::post('/view/{node}/allocation', 'NodesController@createAllocation');
@@ -137,6 +165,29 @@ Route::group(['prefix' => 'nodes'], function () {
 
     Route::delete('/view/{node}/delete', 'NodesController@delete')->name('admin.nodes.view.delete');
     Route::delete('/view/{node}/allocation/remove/{allocation}', 'NodesController@allocationRemoveSingle')->name('admin.nodes.view.allocation.removeSingle');
+    Route::delete('/view/{node}/allocations', 'NodesController@allocationRemoveMultiple')->name('admin.nodes.view.allocation.removeMultiple');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Mount Controller Routes
+|--------------------------------------------------------------------------
+|
+| Endpoint: /admin/mounts
+|
+*/
+Route::group(['prefix' => 'mounts'], function () {
+    Route::get('/', 'MountController@index')->name('admin.mounts');
+    Route::get('/view/{mount}', 'MountController@view')->name('admin.mounts.view');
+
+    Route::post('/', 'MountController@create');
+    Route::post('/{mount}/eggs', 'MountController@addEggs')->name('admin.mounts.eggs');
+    Route::post('/{mount}/nodes', 'MountController@addNodes')->name('admin.mounts.nodes');
+
+    Route::patch('/view/{mount}', 'MountController@update');
+
+    Route::delete('/{mount}/eggs/{egg_id}', 'MountController@deleteEgg');
+    Route::delete('/{mount}/nodes/{node_id}', 'MountController@deleteNode');
 });
 
 /*
@@ -172,26 +223,4 @@ Route::group(['prefix' => 'nests'], function () {
     Route::delete('/view/{nest}', 'Nests\NestController@destroy');
     Route::delete('/egg/{egg}', 'Nests\EggController@destroy');
     Route::delete('/egg/{egg}/variables/{variable}', 'Nests\EggVariableController@destroy');
-});
-
-/*
-|--------------------------------------------------------------------------
-| Pack Controller Routes
-|--------------------------------------------------------------------------
-|
-| Endpoint: /admin/packs
-|
-*/
-Route::group(['prefix' => 'packs'], function () {
-    Route::get('/', 'PackController@index')->name('admin.packs');
-    Route::get('/new', 'PackController@create')->name('admin.packs.new');
-    Route::get('/new/template', 'PackController@newTemplate')->name('admin.packs.new.template');
-    Route::get('/view/{pack}', 'PackController@view')->name('admin.packs.view');
-
-    Route::post('/new', 'PackController@store');
-    Route::post('/view/{pack}/export/{files?}', 'PackController@export')->name('admin.packs.view.export');
-
-    Route::patch('/view/{pack}', 'PackController@update');
-
-    Route::delete('/view/{pack}', 'PackController@destroy');
 });

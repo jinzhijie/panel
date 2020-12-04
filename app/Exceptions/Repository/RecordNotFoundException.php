@@ -1,21 +1,29 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Exceptions\Repository;
 
-class RecordNotFoundException extends \Exception
+use Illuminate\Http\Response;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+
+class RecordNotFoundException extends RepositoryException implements HttpExceptionInterface
 {
     /**
+     * Returns the status code.
+     *
      * @return int
      */
     public function getStatusCode()
     {
-        return 404;
+        return Response::HTTP_NOT_FOUND;
+    }
+
+    /**
+     * Returns response headers.
+     *
+     * @return array
+     */
+    public function getHeaders()
+    {
+        return [];
     }
 }

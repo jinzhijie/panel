@@ -4,7 +4,6 @@ namespace Tests\Unit\Http\Middleware;
 
 use Mockery as m;
 use Pterodactyl\Models\User;
-use Krucas\Settings\Settings;
 use Illuminate\Http\RedirectResponse;
 use Prologue\Alerts\AlertsMessageBag;
 use Pterodactyl\Http\Middleware\RequireTwoFactorAuthentication;
@@ -17,19 +16,13 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     private $alert;
 
     /**
-     * @var \Krucas\Settings\Settings|\Mockery\Mock
-     */
-    private $settings;
-
-    /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
         $this->alert = m::mock(AlertsMessageBag::class);
-        $this->settings = m::mock(Settings::class);
     }
 
     /**
@@ -37,7 +30,7 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
      */
     public function testRequestMissingUser()
     {
-        $this->request->shouldReceive('user')->withNoArgs()->once()->andReturnNull();
+        $this->setRequestUserModel(null);
 
         $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
     }
@@ -46,11 +39,12 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
      * Test that the middleware is ignored on specific routes.
      *
      * @dataProvider ignoredRoutesDataProvider
+     * @param string $route
      */
     public function testRequestOnIgnoredRoute($route)
     {
-        $this->request->shouldReceive('user')->withNoArgs()->once()->andReturn(true);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn($route);
+        $this->generateRequestUserModel();
+        $this->setRequestRouteName($route);
 
         $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
     }
@@ -60,10 +54,21 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
      */
     public function testTwoFactorRequirementDisabled()
     {
-        $this->request->shouldReceive('user')->withNoArgs()->once()->andReturn(true);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn('random.route');
+        $this->generateRequestUserModel();
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(RequireTwoFactorAuthentication::LEVEL_NONE);
 
-        $this->settings->shouldReceive('get')->with('2fa', 0)->once()->andReturn(RequireTwoFactorAuthentication::LEVEL_NONE);
+        $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
+    }
+
+    /**
+     * Test that an invalid value for the level skips the check and continues with the request.
+     */
+    public function testTwoFactorRequirementWithInvalidValue()
+    {
+        $this->generateRequestUserModel();
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(333);
 
         $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
     }
@@ -74,17 +79,16 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     public function testTwoFactorEnabledForAdminsAsAdminUserWith2FADisabled()
     {
         $user = factory(User::class)->make(['root_admin' => 1, 'use_totp' => 0]);
+        $this->setRequestUserModel($user);
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(RequireTwoFactorAuthentication::LEVEL_ADMIN);
 
-        $this->request->shouldReceive('user')->withNoArgs()->times(3)->andReturn($user);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn('random.route');
-
-        $this->settings->shouldReceive('get')->with('2fa', 0)->once()->andReturn(RequireTwoFactorAuthentication::LEVEL_ADMIN);
         $this->alert->shouldReceive('danger')->with(trans('auth.2fa_must_be_enabled'))->once()->andReturnSelf();
         $this->alert->shouldReceive('flash')->withNoArgs()->once()->andReturnSelf();
 
         $response = $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
         $this->assertInstanceOf(RedirectResponse::class, $response);
-        $this->assertEquals(route('account.security'), $response->getTargetUrl());
+        $this->assertEquals(route('account'), $response->getTargetUrl());
     }
 
     /**
@@ -93,11 +97,9 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     public function testTwoFactorEnabledForAdminsAsAdminUserWith2FAEnabled()
     {
         $user = factory(User::class)->make(['root_admin' => 1, 'use_totp' => 1]);
-
-        $this->request->shouldReceive('user')->withNoArgs()->times(3)->andReturn($user);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn('random.route');
-
-        $this->settings->shouldReceive('get')->with('2fa', 0)->once()->andReturn(RequireTwoFactorAuthentication::LEVEL_ADMIN);
+        $this->setRequestUserModel($user);
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(RequireTwoFactorAuthentication::LEVEL_ADMIN);
 
         $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
     }
@@ -108,11 +110,9 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     public function testTwoFactorEnabledForAdminsAsNonAdmin()
     {
         $user = factory(User::class)->make(['root_admin' => 0]);
-
-        $this->request->shouldReceive('user')->withNoArgs()->twice()->andReturn($user);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn('random.route');
-
-        $this->settings->shouldReceive('get')->with('2fa', 0)->once()->andReturn(RequireTwoFactorAuthentication::LEVEL_ADMIN);
+        $this->setRequestUserModel($user);
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(RequireTwoFactorAuthentication::LEVEL_ADMIN);
 
         $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
     }
@@ -123,17 +123,16 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     public function testTwoFactorEnabledForAllUsersAsUserWith2FADisabled()
     {
         $user = factory(User::class)->make(['use_totp' => 0]);
+        $this->setRequestUserModel($user);
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(RequireTwoFactorAuthentication::LEVEL_ALL);
 
-        $this->request->shouldReceive('user')->withNoArgs()->twice()->andReturn($user);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn('random.route');
-
-        $this->settings->shouldReceive('get')->with('2fa', 0)->once()->andReturn(RequireTwoFactorAuthentication::LEVEL_ALL);
         $this->alert->shouldReceive('danger')->with(trans('auth.2fa_must_be_enabled'))->once()->andReturnSelf();
         $this->alert->shouldReceive('flash')->withNoArgs()->once()->andReturnSelf();
 
         $response = $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
         $this->assertInstanceOf(RedirectResponse::class, $response);
-        $this->assertEquals(route('account.security'), $response->getTargetUrl());
+        $this->assertEquals(route('account'), $response->getTargetUrl());
     }
 
     /**
@@ -142,11 +141,9 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     public function testTwoFactorEnabledForAllUsersAsUserWith2FAEnabled()
     {
         $user = factory(User::class)->make(['use_totp' => 1]);
-
-        $this->request->shouldReceive('user')->withNoArgs()->twice()->andReturn($user);
-        $this->request->shouldReceive('route->getName')->withNoArgs()->once()->andReturn('random.route');
-
-        $this->settings->shouldReceive('get')->with('2fa', 0)->once()->andReturn(RequireTwoFactorAuthentication::LEVEL_ALL);
+        $this->setRequestUserModel($user);
+        $this->setRequestRouteName('random.route');
+        $this->setRequirementLevel(RequireTwoFactorAuthentication::LEVEL_ALL);
 
         $this->getMiddleware()->handle($this->request, $this->getClosureAssertions());
     }
@@ -159,7 +156,8 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
     public function ignoredRoutesDataProvider()
     {
         return [
-            ['account.security'],
+            ['auth'],
+            ['account'],
             ['account.security.revoke'],
             ['account.security.totp'],
             ['account.security.totp.set'],
@@ -176,6 +174,16 @@ class RequireTwoFactorAuthenticationTest extends MiddlewareTestCase
      */
     private function getMiddleware(): RequireTwoFactorAuthentication
     {
-        return new RequireTwoFactorAuthentication($this->alert, $this->settings);
+        return new RequireTwoFactorAuthentication($this->alert);
+    }
+
+    /**
+     * Set the authentication level requirement.
+     *
+     * @param int $level
+     */
+    private function setRequirementLevel(int $level)
+    {
+        config()->set('pterodactyl.auth.2fa_required', $level);
     }
 }

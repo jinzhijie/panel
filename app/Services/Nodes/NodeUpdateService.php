@@ -1,90 +1,109 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Services\Nodes;
 
-use Illuminate\Log\Writer;
+use Illuminate\Support\Str;
 use Pterodactyl\Models\Node;
-use GuzzleHttp\Exception\RequestException;
-use Pterodactyl\Exceptions\DisplayException;
-use Pterodactyl\Contracts\Repository\NodeRepositoryInterface;
-use Pterodactyl\Contracts\Repository\Daemon\ConfigurationRepositoryInterface;
+use GuzzleHttp\Exception\ConnectException;
+use Illuminate\Database\ConnectionInterface;
+use Illuminate\Contracts\Encryption\Encrypter;
+use Pterodactyl\Repositories\Eloquent\NodeRepository;
+use Pterodactyl\Repositories\Daemon\ConfigurationRepository;
+use Pterodactyl\Repositories\Wings\DaemonConfigurationRepository;
+use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
+use Pterodactyl\Exceptions\Service\Node\ConfigurationNotPersistedException;
 
 class NodeUpdateService
 {
     /**
-     * @var \Pterodactyl\Contracts\Repository\Daemon\ConfigurationRepositoryInterface
+     * @var \Illuminate\Database\ConnectionInterface
      */
-    protected $configRepository;
+    private $connection;
 
     /**
-     * @var \Pterodactyl\Contracts\Repository\NodeRepositoryInterface
+     * @var \Pterodactyl\Repositories\Wings\DaemonConfigurationRepository
      */
-    protected $repository;
+    private $configurationRepository;
 
     /**
-     * @var \Illuminate\Log\Writer
+     * @var \Illuminate\Contracts\Encryption\Encrypter
      */
-    protected $writer;
+    private $encrypter;
+
+    /**
+     * @var \Pterodactyl\Repositories\Eloquent\NodeRepository
+     */
+    private $repository;
 
     /**
      * UpdateService constructor.
      *
-     * @param \Pterodactyl\Contracts\Repository\Daemon\ConfigurationRepositoryInterface $configurationRepository
-     * @param \Pterodactyl\Contracts\Repository\NodeRepositoryInterface                 $repository
-     * @param \Illuminate\Log\Writer                                                    $writer
+     * @param \Illuminate\Database\ConnectionInterface $connection
+     * @param \Illuminate\Contracts\Encryption\Encrypter $encrypter
+     * @param \Pterodactyl\Repositories\Wings\DaemonConfigurationRepository $configurationRepository
+     * @param \Pterodactyl\Repositories\Eloquent\NodeRepository $repository
      */
     public function __construct(
-        ConfigurationRepositoryInterface $configurationRepository,
-        NodeRepositoryInterface $repository,
-        Writer $writer
+        ConnectionInterface $connection,
+        Encrypter $encrypter,
+        DaemonConfigurationRepository $configurationRepository,
+        NodeRepository $repository
     ) {
-        $this->configRepository = $configurationRepository;
+        $this->connection = $connection;
+        $this->configurationRepository = $configurationRepository;
+        $this->encrypter = $encrypter;
         $this->repository = $repository;
-        $this->writer = $writer;
     }
 
     /**
      * Update the configuration values for a given node on the machine.
      *
-     * @param int|\Pterodactyl\Models\Node $node
-     * @param array                        $data
-     * @return mixed
+     * @param \Pterodactyl\Models\Node $node
+     * @param array $data
+     * @param bool $resetToken
      *
-     * @throws \Pterodactyl\Exceptions\DisplayException
-     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     * @return \Pterodactyl\Models\Node
+     * @throws \Throwable
      */
-    public function handle($node, array $data)
+    public function handle(Node $node, array $data, bool $resetToken = false)
     {
-        if (! $node instanceof Node) {
-            $node = $this->repository->find($node);
+        if ($resetToken) {
+            $data['daemon_token'] = $this->encrypter->encrypt(Str::random(Node::DAEMON_TOKEN_LENGTH));
+            $data['daemon_token_id'] = Str::random(Node::DAEMON_TOKEN_ID_LENGTH);
         }
 
-        if (! is_null(array_get($data, 'reset_secret'))) {
-            $data['daemonSecret'] = str_random(NodeCreationService::DAEMON_SECRET_LENGTH);
-            unset($data['reset_secret']);
+        [$updated, $exception] = $this->connection->transaction(function () use ($data, $node) {
+            /** @var \Pterodactyl\Models\Node $updated */
+            $updated = $this->repository->withFreshModel()->update($node->id, $data, true, true);
+
+            try {
+                // If we're changing the FQDN for the node, use the newly provided FQDN for the connection
+                // address. This should alleviate issues where the node gets pointed to a "valid" FQDN that
+                // isn't actually running the daemon software, and therefore you can't actually change it
+                // back.
+                //
+                // This makes more sense anyways, because only the Panel uses the FQDN for connecting, the
+                // node doesn't actually care about this.
+                //
+                // @see https://github.com/pterodactyl/panel/issues/1931
+                $node->fqdn = $updated->fqdn;
+
+                $this->configurationRepository->setNode($node)->update($updated);
+            } catch (DaemonConnectionException $exception) {
+                if (! is_null($exception->getPrevious()) && $exception->getPrevious() instanceof ConnectException) {
+                    return [$updated, true];
+                }
+
+                throw $exception;
+            }
+
+            return [$updated, false];
+        });
+
+        if ($exception) {
+            throw new ConfigurationNotPersistedException(trans('exceptions.node.daemon_off_config_updated'));
         }
 
-        $updateResponse = $this->repository->withoutFresh()->update($node->id, $data);
-
-        try {
-            $this->configRepository->setNode($node->id)->update();
-        } catch (RequestException $exception) {
-            $response = $exception->getResponse();
-            $this->writer->warning($exception);
-
-            throw new DisplayException(trans('exceptions.node.daemon_off_config_updated', [
-                'code' => is_null($response) ? 'E_CONN_REFUSED' : $response->getStatusCode(),
-            ]));
-        }
-
-        return $updateResponse;
+        return $updated;
     }
 }

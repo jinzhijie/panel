@@ -35,9 +35,9 @@ class NodeDeletionService
     /**
      * DeletionService constructor.
      *
-     * @param \Pterodactyl\Contracts\Repository\NodeRepositoryInterface   $repository
+     * @param \Pterodactyl\Contracts\Repository\NodeRepositoryInterface $repository
      * @param \Pterodactyl\Contracts\Repository\ServerRepositoryInterface $serverRepository
-     * @param \Illuminate\Contracts\Translation\Translator                $translator
+     * @param \Illuminate\Contracts\Translation\Translator $translator
      */
     public function __construct(
         NodeRepositoryInterface $repository,
@@ -63,7 +63,7 @@ class NodeDeletionService
             $node = $node->id;
         }
 
-        $servers = $this->serverRepository->withColumns('id')->findCountWhere([['node_id', '=', $node]]);
+        $servers = $this->serverRepository->setColumns('id')->findCountWhere([['node_id', '=', $node]]);
         if ($servers > 0) {
             throw new HasActiveServersException($this->translator->trans('exceptions.node.servers_attached'));
         }

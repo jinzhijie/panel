@@ -3,6 +3,7 @@
 namespace Pterodactyl\Services\Databases;
 
 use Pterodactyl\Models\Database;
+use Pterodactyl\Helpers\Utilities;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Pterodactyl\Extensions\DynamicDatabaseConnection;
@@ -33,10 +34,10 @@ class DatabasePasswordService
     /**
      * DatabasePasswordService constructor.
      *
-     * @param \Illuminate\Database\ConnectionInterface                      $connection
+     * @param \Illuminate\Database\ConnectionInterface $connection
      * @param \Pterodactyl\Contracts\Repository\DatabaseRepositoryInterface $repository
-     * @param \Pterodactyl\Extensions\DynamicDatabaseConnection             $dynamic
-     * @param \Illuminate\Contracts\Encryption\Encrypter                    $encrypter
+     * @param \Pterodactyl\Extensions\DynamicDatabaseConnection $dynamic
+     * @param \Illuminate\Contracts\Encryption\Encrypter $encrypter
      */
     public function __construct(
         ConnectionInterface $connection,
@@ -54,33 +55,27 @@ class DatabasePasswordService
      * Updates a password for a given database.
      *
      * @param \Pterodactyl\Models\Database|int $database
-     * @param string                           $password
-     * @return bool
+     * @return string
      *
-     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     * @throws \Throwable
      */
-    public function handle($database, string $password): bool
+    public function handle(Database $database): string
     {
-        if (! $database instanceof Database) {
-            $database = $this->repository->find($database);
-        }
+        $password = Utilities::randomStringWithSpecialCharacters(24);
 
-        $this->dynamic->set('dynamic', $database->database_host_id);
-        $this->connection->beginTransaction();
+        $this->connection->transaction(function () use ($database, $password) {
+            $this->dynamic->set('dynamic', $database->database_host_id);
 
-        $updated = $this->repository->withoutFresh()->update($database->id, [
-            'password' => $this->encrypter->encrypt($password),
-        ]);
+            $this->repository->withoutFreshModel()->update($database->id, [
+                'password' => $this->encrypter->encrypt($password),
+            ]);
 
-        $this->repository->dropUser($database->username, $database->remote);
-        $this->repository->createUser($database->username, $database->remote, $password);
-        $this->repository->assignUserToDatabase($database->database, $database->username, $database->remote);
-        $this->repository->flush();
+            $this->repository->dropUser($database->username, $database->remote);
+            $this->repository->createUser($database->username, $database->remote, $password, $database->max_connections);
+            $this->repository->assignUserToDatabase($database->database, $database->username, $database->remote);
+            $this->repository->flush();
+        });
 
-        unset($password);
-        $this->connection->commit();
-
-        return $updated;
+        return $password;
     }
 }

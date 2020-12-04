@@ -3,6 +3,17 @@
 return [
     /*
     |--------------------------------------------------------------------------
+    | Restricted Environment
+    |--------------------------------------------------------------------------
+    |
+    | Set this environment variable to true to enable a restricted configuration
+    | setup on the panel. When set to true, configurations stored in the
+    | database will not be applied.
+    */
+    'load_environment_only' => (bool)env('APP_ENVIRONMENT_ONLY', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Service Author
     |--------------------------------------------------------------------------
     |
@@ -22,7 +33,12 @@ return [
     | Should login success and failure events trigger an email to the user?
     */
     'auth' => [
-        'notifications' => env('LOGIN_NOTIFICATIONS', false),
+        '2fa_required' => env('APP_2FA_REQUIRED', 0),
+        '2fa' => [
+            'bytes' => 32,
+            'window' => env('APP_2FA_WINDOW', 4),
+            'verify_newer' => true,
+        ],
     ],
 
     /*
@@ -40,7 +56,6 @@ return [
         'admin' => [
             'servers' => env('APP_PAGINATE_ADMIN_SERVERS', 25),
             'users' => env('APP_PAGINATE_ADMIN_USERS', 25),
-            'packs' => env('APP_PAGINATE_ADMIN_PACKS', 50),
         ],
         'api' => [
             'nodes' => env('APP_PAGINATE_API_NODES', 25),
@@ -69,8 +84,8 @@ return [
     | Configure the timeout to be used for Guzzle connections here.
     */
     'guzzle' => [
-        'timeout' => env('GUZZLE_TIMEOUT', 5),
-        'connect_timeout' => env('GUZZLE_CONNECT_TIMEOUT', 3),
+        'timeout' => env('GUZZLE_TIMEOUT', 30),
+        'connect_timeout' => env('GUZZLE_CONNECT_TIMEOUT', 10),
     ],
 
     /*
@@ -84,29 +99,6 @@ return [
         'low' => env('QUEUE_LOW', 'low'),
         'standard' => env('QUEUE_STANDARD', 'standard'),
         'high' => env('QUEUE_HIGH', 'high'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Console Configuration
-    |--------------------------------------------------------------------------
-    |
-    | Configure the speed at which data is rendered to the console.
-    */
-    'console' => [
-        'count' => env('CONSOLE_PUSH_COUNT', 10),
-        'frequency' => env('CONSOLE_PUSH_FREQ', 200),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Daemon Connection Details
-    |--------------------------------------------------------------------------
-    |
-    | Configuration for support of the new Golang based daemon.
-    */
-    'daemon' => [
-        'use_new_daemon' => (bool) env('APP_USE_NEW_DAEMON', false),
     ],
 
     /*
@@ -136,14 +128,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Language Editor
+    | Client Features
     |--------------------------------------------------------------------------
     |
-    | Set `PHRASE_IN_CONTEXT` to true to enable the PhaseApp in-context editor
-    | on this site which allows you to translate the panel, from the panel.
+    | Allow clients to create their own databases.
     */
-    'lang' => [
-        'in_context' => env('PHRASE_IN_CONTEXT', false),
+    'client_features' => [
+        'databases' => [
+            'enabled' => env('PTERODACTYL_CLIENT_DATABASES_ENABLED', true),
+            'allow_random' => env('PTERODACTYL_CLIENT_DATABASES_ALLOW_RANDOM', true),
+        ],
+
+        'schedules' => [
+            // The total number of tasks that can exist for any given schedule at once.
+            'per_schedule_task_limit' => 10,
+        ],
+
+        'allocations' => [
+            'enabled' => env('PTERODACTYL_CLIENT_ALLOCATIONS_ENABLED', false),
+            'range_start' => env('PTERODACTYL_CLIENT_ALLOCATIONS_RANGE_START'),
+            'range_end' => env('PTERODACTYL_CLIENT_ALLOCATIONS_RANGE_END'),
+        ],
     ],
 
     /*
@@ -154,20 +159,7 @@ return [
     | This array includes the MIME filetypes that can be edited via the web.
     */
     'files' => [
-        'max_edit_size' => env('PTERODACTYL_FILES_MAX_EDIT_SIZE', 50000),
-        'editable' => [
-            'application/json',
-            'application/javascript',
-            'application/xml',
-            'application/xhtml+xml',
-            'inode/x-empty',
-            'text/xml',
-            'text/css',
-            'text/html',
-            'text/plain',
-            'text/x-perl',
-            'text/x-shellscript',
-        ],
+        'max_edit_size' => env('PTERODACTYL_FILES_MAX_EDIT_SIZE', 1024 * 1024 * 4),
     ],
 
     /*
@@ -199,5 +191,18 @@ return [
     |
     | 'P_SERVER_CREATED_AT' => 'created_at'
     */
-    'environment_variables' => [],
+    'environment_variables' => [
+        'P_SERVER_ALLOCATION_LIMIT' => 'allocation_limit',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Asset Verification
+    |--------------------------------------------------------------------------
+    |
+    | This section controls the output format for JS & CSS assets.
+    */
+    'assets' => [
+        'use_hash' => env('PTERODACTYL_USE_ASSET_HASH', false),
+    ],
 ];

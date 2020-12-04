@@ -23,10 +23,5 @@ class DeleteTaskWhenParentServerIsDeleted extends Migration
      */
     public function down()
     {
-        Schema::table('tasks', function (Blueprint $table) {
-            $table->dropForeign(['server_id']);
-
-            $table->foreign('server_id')->references('id')->on('servers');
-        });
     }
 }

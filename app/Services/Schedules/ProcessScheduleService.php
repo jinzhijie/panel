@@ -1,75 +1,82 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Services\Schedules;
 
-use Cron\CronExpression;
-use Webmozart\Assert\Assert;
+use Exception;
 use Pterodactyl\Models\Schedule;
-use Pterodactyl\Services\Schedules\Tasks\RunTaskService;
-use Pterodactyl\Contracts\Repository\ScheduleRepositoryInterface;
+use Illuminate\Contracts\Bus\Dispatcher;
+use Pterodactyl\Jobs\Schedule\RunTaskJob;
+use Illuminate\Database\ConnectionInterface;
+use Pterodactyl\Exceptions\DisplayException;
 
 class ProcessScheduleService
 {
     /**
-     * @var \Pterodactyl\Contracts\Repository\ScheduleRepositoryInterface
+     * @var \Illuminate\Contracts\Bus\Dispatcher
      */
-    protected $repository;
+    private $dispatcher;
 
     /**
-     * @var \Pterodactyl\Services\Schedules\Tasks\RunTaskService
+     * @var \Illuminate\Database\ConnectionInterface
      */
-    protected $runnerService;
+    private $connection;
 
     /**
      * ProcessScheduleService constructor.
      *
-     * @param \Pterodactyl\Services\Schedules\Tasks\RunTaskService          $runnerService
-     * @param \Pterodactyl\Contracts\Repository\ScheduleRepositoryInterface $repository
+     * @param \Illuminate\Database\ConnectionInterface $connection
+     * @param \Illuminate\Contracts\Bus\Dispatcher $dispatcher
      */
-    public function __construct(RunTaskService $runnerService, ScheduleRepositoryInterface $repository)
+    public function __construct(ConnectionInterface $connection, Dispatcher $dispatcher)
     {
-        $this->repository = $repository;
-        $this->runnerService = $runnerService;
+        $this->dispatcher = $dispatcher;
+        $this->connection = $connection;
     }
 
     /**
      * Process a schedule and push the first task onto the queue worker.
      *
-     * @param int|\Pterodactyl\Models\Schedule $schedule
+     * @param \Pterodactyl\Models\Schedule $schedule
+     * @param bool $now
      *
-     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     * @throws \Throwable
      */
-    public function handle($schedule)
+    public function handle(Schedule $schedule, bool $now = false)
     {
-        Assert::true(($schedule instanceof Schedule || is_digit($schedule)),
-            'First argument passed to handle must be instance of \Pterodactyl\Models\Schedule or an integer, received %s.'
-        );
+        /** @var \Pterodactyl\Models\Task $task */
+        $task = $schedule->tasks()->orderBy('sequence_id', 'asc')->first();
 
-        if (($schedule instanceof Schedule && ! $schedule->relationLoaded('tasks')) || ! $schedule instanceof Schedule) {
-            $schedule = $this->repository->getScheduleWithTasks(is_digit($schedule) ? $schedule : $schedule->id);
+        if (is_null($task)) {
+            throw new DisplayException(
+                'Cannot process schedule for task execution: no tasks are registered.'
+            );
         }
 
-        $formattedCron = sprintf('%s %s %s * %s *',
-            $schedule->cron_minute,
-            $schedule->cron_hour,
-            $schedule->cron_day_of_month,
-            $schedule->cron_day_of_week
-        );
+        $this->connection->transaction(function () use ($schedule, $task) {
+            $schedule->forceFill([
+                'is_processing' => true,
+                'next_run_at' => $schedule->getNextRunDate(),
+            ])->saveOrFail();
 
-        $this->repository->update($schedule->id, [
-            'is_processing' => true,
-            'next_run_at' => CronExpression::factory($formattedCron)->getNextRunDate(),
-        ]);
+            $task->update(['is_queued' => true]);
+        });
 
-        $task = $schedule->tasks->where('sequence_id', 1)->first();
-        $this->runnerService->handle($task);
+        $job = new RunTaskJob($task);
+
+        if (! $now) {
+            $this->dispatcher->dispatch($job->delay($task->time_offset));
+        } else {
+            // When using dispatchNow the RunTaskJob::failed() function is not called automatically
+            // so we need to manually trigger it and then continue with the exception throw.
+            //
+            // @see https://github.com/pterodactyl/panel/issues/2550
+            try {
+                $this->dispatcher->dispatchNow($job);
+            } catch (Exception $exception) {
+                $job->failed($exception);
+
+                throw $exception;
+            }
+        }
     }
 }

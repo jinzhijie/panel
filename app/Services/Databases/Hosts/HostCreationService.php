@@ -39,11 +39,11 @@ class HostCreationService
     /**
      * HostCreationService constructor.
      *
-     * @param \Illuminate\Database\ConnectionInterface                          $connection
-     * @param \Illuminate\Database\DatabaseManager                              $databaseManager
+     * @param \Illuminate\Database\ConnectionInterface $connection
+     * @param \Illuminate\Database\DatabaseManager $databaseManager
      * @param \Pterodactyl\Contracts\Repository\DatabaseHostRepositoryInterface $repository
-     * @param \Pterodactyl\Extensions\DynamicDatabaseConnection                 $dynamic
-     * @param \Illuminate\Contracts\Encryption\Encrypter                        $encrypter
+     * @param \Pterodactyl\Extensions\DynamicDatabaseConnection $dynamic
+     * @param \Illuminate\Contracts\Encryption\Encrypter $encrypter
      */
     public function __construct(
         ConnectionInterface $connection,
@@ -65,28 +65,26 @@ class HostCreationService
      * @param array $data
      * @return \Pterodactyl\Models\DatabaseHost
      *
-     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     * @throws \Throwable
      */
     public function handle(array $data): DatabaseHost
     {
-        $this->connection->beginTransaction();
+        return $this->connection->transaction(function () use ($data) {
+            $host = $this->repository->create([
+                'password' => $this->encrypter->encrypt(array_get($data, 'password')),
+                'name' => array_get($data, 'name'),
+                'host' => array_get($data, 'host'),
+                'port' => array_get($data, 'port'),
+                'username' => array_get($data, 'username'),
+                'max_databases' => null,
+                'node_id' => array_get($data, 'node_id'),
+            ]);
 
-        $host = $this->repository->create([
-            'password' => $this->encrypter->encrypt(array_get($data, 'password')),
-            'name' => array_get($data, 'name'),
-            'host' => array_get($data, 'host'),
-            'port' => array_get($data, 'port'),
-            'username' => array_get($data, 'username'),
-            'max_databases' => null,
-            'node_id' => array_get($data, 'node_id'),
-        ]);
+            // Confirm access using the provided credentials before saving data.
+            $this->dynamic->set('dynamic', $host);
+            $this->databaseManager->connection('dynamic')->select('SELECT 1 FROM dual');
 
-        // Confirm access using the provided credentials before saving data.
-        $this->dynamic->set('dynamic', $host);
-        $this->databaseManager->connection('dynamic')->select('SELECT 1 FROM dual');
-        $this->connection->commit();
-
-        return $host;
+            return $host;
+        });
     }
 }

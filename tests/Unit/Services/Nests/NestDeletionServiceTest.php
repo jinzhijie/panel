@@ -9,7 +9,6 @@
 
 namespace Tests\Unit\Services\Services;
 
-use Exception;
 use Mockery as m;
 use Tests\TestCase;
 use Pterodactyl\Exceptions\PterodactylException;
@@ -38,7 +37,7 @@ class NestDeletionServiceTest extends TestCase
     /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -74,7 +73,7 @@ class NestDeletionServiceTest extends TestCase
             $this->service->handle(1);
         } catch (PterodactylException $exception) {
             $this->assertInstanceOf(HasActiveServersException::class, $exception);
-            $this->assertEquals(trans('exceptions.service.delete_has_servers'), $exception->getMessage());
+            $this->assertEquals(trans('exceptions.nest.delete_has_servers'), $exception->getMessage());
         }
     }
 

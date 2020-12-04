@@ -1,39 +1,34 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Services\Users;
 
+use Pterodactyl\Models\User;
 use Illuminate\Contracts\Hashing\Hasher;
-use Pterodactyl\Contracts\Repository\UserRepositoryInterface;
+use Pterodactyl\Traits\Services\HasUserLevels;
+use Pterodactyl\Repositories\Eloquent\UserRepository;
 
 class UserUpdateService
 {
+    use HasUserLevels;
+
     /**
      * @var \Illuminate\Contracts\Hashing\Hasher
      */
-    protected $hasher;
+    private $hasher;
 
     /**
-     * @var \Pterodactyl\Contracts\Repository\UserRepositoryInterface
+     * @var \Pterodactyl\Repositories\Eloquent\UserRepository
      */
-    protected $repository;
+    private $repository;
 
     /**
      * UpdateService constructor.
      *
-     * @param \Illuminate\Contracts\Hashing\Hasher                      $hasher
-     * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface $repository
+     * @param \Illuminate\Contracts\Hashing\Hasher $hasher
+     * @param \Pterodactyl\Repositories\Eloquent\UserRepository $repository
      */
-    public function __construct(
-        Hasher $hasher,
-        UserRepositoryInterface $repository
-    ) {
+    public function __construct(Hasher $hasher, UserRepository $repository)
+    {
         $this->hasher = $hasher;
         $this->repository = $repository;
     }
@@ -41,19 +36,24 @@ class UserUpdateService
     /**
      * Update the user model instance.
      *
-     * @param int   $id
+     * @param \Pterodactyl\Models\User $user
      * @param array $data
-     * @return mixed
+     * @return \Pterodactyl\Models\User
      *
      * @throws \Pterodactyl\Exceptions\Model\DataValidationException
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function handle($id, array $data)
+    public function handle(User $user, array $data)
     {
-        if (isset($data['password'])) {
+        if (! empty(array_get($data, 'password'))) {
             $data['password'] = $this->hasher->make($data['password']);
+        } else {
+            unset($data['password']);
         }
 
-        return $this->repository->update($id, $data);
+        /** @var \Pterodactyl\Models\User $response */
+        $response = $this->repository->update($user->id, $data);
+
+        return $response;
     }
 }

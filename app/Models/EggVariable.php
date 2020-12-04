@@ -1,23 +1,35 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Models;
 
-use Sofa\Eloquence\Eloquence;
-use Sofa\Eloquence\Validable;
-use Illuminate\Database\Eloquent\Model;
-use Sofa\Eloquence\Contracts\CleansAttributes;
-use Sofa\Eloquence\Contracts\Validable as ValidableContract;
-
-class EggVariable extends Model implements CleansAttributes, ValidableContract
+/**
+ * @property int $id
+ * @property int $egg_id
+ * @property string $name
+ * @property string $description
+ * @property string $env_variable
+ * @property string $default_value
+ * @property bool $user_viewable
+ * @property bool $user_editable
+ * @property string $rules
+ * @property \Carbon\CarbonImmutable $created_at
+ * @property \Carbon\CarbonImmutable $updated_at
+ *
+ * @property bool $required
+ * @property \Pterodactyl\Models\Egg $egg
+ * @property \Pterodactyl\Models\ServerVariable $serverVariable
+ *
+ * The "server_value" variable is only present on the object if you've loaded this model
+ * using the server relationship.
+ * @property string|null $server_value
+ */
+class EggVariable extends Model
 {
-    use Eloquence, Validable;
+    /**
+     * The resource name for this model when it is transformed into an
+     * API representation using fractal.
+     */
+    const RESOURCE_NAME = 'egg_variable';
 
     /**
      * Reserved environment variable names.
@@ -25,6 +37,11 @@ class EggVariable extends Model implements CleansAttributes, ValidableContract
      * @var string
      */
     const RESERVED_ENV_NAMES = 'SERVER_MEMORY,SERVER_IP,SERVER_PORT,ENV,HOME,USER,STARTUP,SERVER_UUID,UUID';
+
+    /**
+     * @var bool
+     */
+    protected $immutableDates = true;
 
     /**
      * The table associated with the model.
@@ -47,31 +64,22 @@ class EggVariable extends Model implements CleansAttributes, ValidableContract
      */
     protected $casts = [
         'egg_id' => 'integer',
-        'user_viewable' => 'integer',
-        'user_editable' => 'integer',
+        'user_viewable' => 'bool',
+        'user_editable' => 'bool',
     ];
 
     /**
      * @var array
      */
-    protected static $applicationRules = [
-        'name' => 'required',
-        'env_variable' => 'required',
-        'rules' => 'required',
-    ];
-
-    /**
-     * @var array
-     */
-    protected static $dataIntegrityRules = [
+    public static $validationRules = [
         'egg_id' => 'exists:eggs,id',
-        'name' => 'string|between:1,255',
-        'description' => 'nullable|string',
-        'env_variable' => 'regex:/^[\w]{1,255}$/|notIn:' . self::RESERVED_ENV_NAMES,
+        'name' => 'required|string|between:1,191',
+        'description' => 'string',
+        'env_variable' => 'required|regex:/^[\w]{1,191}$/|notIn:' . self::RESERVED_ENV_NAMES,
         'default_value' => 'string',
         'user_viewable' => 'boolean',
         'user_editable' => 'boolean',
-        'rules' => 'string',
+        'rules' => 'required|string',
     ];
 
     /**
@@ -85,9 +93,17 @@ class EggVariable extends Model implements CleansAttributes, ValidableContract
     /**
      * @return bool
      */
-    public function getRequiredAttribute($value)
+    public function getRequiredAttribute()
     {
-        return $this->rules === 'required' || str_contains($this->rules, ['required|', '|required']);
+        return in_array('required', explode('|', $this->rules));
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     */
+    public function egg()
+    {
+        return $this->hasOne(Egg::class);
     }
 
     /**

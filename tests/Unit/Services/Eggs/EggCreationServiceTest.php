@@ -9,7 +9,6 @@
 
 namespace Tests\Unit\Services\Services\Options;
 
-use Exception;
 use Mockery as m;
 use Tests\TestCase;
 use Pterodactyl\Models\Egg;
@@ -42,7 +41,7 @@ class EggCreationServiceTest extends TestCase
     /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 

@@ -36,8 +36,8 @@ class UserDeletionService
      * DeletionService constructor.
      *
      * @param \Pterodactyl\Contracts\Repository\ServerRepositoryInterface $serverRepository
-     * @param \Illuminate\Contracts\Translation\Translator                $translator
-     * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface   $repository
+     * @param \Illuminate\Contracts\Translation\Translator $translator
+     * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface $repository
      */
     public function __construct(
         ServerRepositoryInterface $serverRepository,
@@ -63,7 +63,7 @@ class UserDeletionService
             $user = $user->id;
         }
 
-        $servers = $this->serverRepository->withColumns('id')->findCountWhere([['owner_id', '=', $user]]);
+        $servers = $this->serverRepository->setColumns('id')->findCountWhere([['owner_id', '=', $user]]);
         if ($servers > 0) {
             throw new DisplayException($this->translator->trans('admin/user.exceptions.user_has_servers'));
         }

@@ -1,43 +1,59 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Services\Eggs\Variables;
 
 use Pterodactyl\Models\EggVariable;
+use Illuminate\Contracts\Validation\Factory;
+use Pterodactyl\Traits\Services\ValidatesValidationRules;
 use Pterodactyl\Contracts\Repository\EggVariableRepositoryInterface;
 use Pterodactyl\Exceptions\Service\Egg\Variable\ReservedVariableNameException;
 
 class VariableCreationService
 {
+    use ValidatesValidationRules;
+
     /**
      * @var \Pterodactyl\Contracts\Repository\EggVariableRepositoryInterface
      */
-    protected $repository;
+    private $repository;
+
+    /**
+     * @var \Illuminate\Contracts\Validation\Factory
+     */
+    private $validator;
 
     /**
      * VariableCreationService constructor.
      *
      * @param \Pterodactyl\Contracts\Repository\EggVariableRepositoryInterface $repository
+     * @param \Illuminate\Contracts\Validation\Factory $validator
      */
-    public function __construct(EggVariableRepositoryInterface $repository)
+    public function __construct(EggVariableRepositoryInterface $repository, Factory $validator)
     {
         $this->repository = $repository;
+        $this->validator = $validator;
+    }
+
+    /**
+     * Return the validation factory instance to be used by rule validation
+     * checking in the trait.
+     *
+     * @return \Illuminate\Contracts\Validation\Factory
+     */
+    protected function getValidator(): Factory
+    {
+        return $this->validator;
     }
 
     /**
      * Create a new variable for a given Egg.
      *
-     * @param int   $egg
+     * @param int $egg
      * @param array $data
      * @return \Pterodactyl\Models\EggVariable
      *
      * @throws \Pterodactyl\Exceptions\Model\DataValidationException
+     * @throws \Pterodactyl\Exceptions\Service\Egg\Variable\BadValidationRuleException
      * @throws \Pterodactyl\Exceptions\Service\Egg\Variable\ReservedVariableNameException
      */
     public function handle(int $egg, array $data): EggVariable
@@ -49,12 +65,21 @@ class VariableCreationService
             ));
         }
 
-        $options = array_get($data, 'options', []);
+        if (! empty($data['rules'] ?? '')) {
+            $this->validateRules($data['rules']);
+        }
 
-        return $this->repository->create(array_merge($data, [
+        $options = array_get($data, 'options') ?? [];
+
+        return $this->repository->create([
             'egg_id' => $egg,
+            'name' => $data['name'] ?? '',
+            'description' => $data['description'] ?? '',
+            'env_variable' => $data['env_variable'] ?? '',
+            'default_value' => $data['default_value'] ?? '',
             'user_viewable' => in_array('user_viewable', $options),
             'user_editable' => in_array('user_editable', $options),
-        ]));
+            'rules' => $data['rules'] ?? '',
+        ]);
     }
 }

@@ -1,41 +1,57 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Services\Eggs\Variables;
 
+use Illuminate\Support\Str;
 use Pterodactyl\Models\EggVariable;
+use Illuminate\Contracts\Validation\Factory;
 use Pterodactyl\Exceptions\DisplayException;
+use Pterodactyl\Traits\Services\ValidatesValidationRules;
 use Pterodactyl\Contracts\Repository\EggVariableRepositoryInterface;
 use Pterodactyl\Exceptions\Service\Egg\Variable\ReservedVariableNameException;
 
 class VariableUpdateService
 {
+    use ValidatesValidationRules;
+
     /**
      * @var \Pterodactyl\Contracts\Repository\EggVariableRepositoryInterface
      */
-    protected $repository;
+    private $repository;
+
+    /**
+     * @var \Illuminate\Contracts\Validation\Factory
+     */
+    private $validator;
 
     /**
      * VariableUpdateService constructor.
      *
      * @param \Pterodactyl\Contracts\Repository\EggVariableRepositoryInterface $repository
+     * @param \Illuminate\Contracts\Validation\Factory $validator
      */
-    public function __construct(EggVariableRepositoryInterface $repository)
+    public function __construct(EggVariableRepositoryInterface $repository, Factory $validator)
     {
         $this->repository = $repository;
+        $this->validator = $validator;
+    }
+
+    /**
+     * Return the validation factory instance to be used by rule validation
+     * checking in the trait.
+     *
+     * @return \Illuminate\Contracts\Validation\Factory
+     */
+    protected function getValidator(): Factory
+    {
+        return $this->validator;
     }
 
     /**
      * Update a specific egg variable.
      *
-     * @param int|\Pterodactyl\Models\EggVariable $variable
-     * @param array                               $data
+     * @param \Pterodactyl\Models\EggVariable $variable
+     * @param array $data
      * @return mixed
      *
      * @throws \Pterodactyl\Exceptions\DisplayException
@@ -43,12 +59,8 @@ class VariableUpdateService
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      * @throws \Pterodactyl\Exceptions\Service\Egg\Variable\ReservedVariableNameException
      */
-    public function handle($variable, array $data)
+    public function handle(EggVariable $variable, array $data)
     {
-        if (! $variable instanceof EggVariable) {
-            $variable = $this->repository->find($variable);
-        }
-
         if (! is_null(array_get($data, 'env_variable'))) {
             if (in_array(strtoupper(array_get($data, 'env_variable')), explode(',', EggVariable::RESERVED_ENV_NAMES))) {
                 throw new ReservedVariableNameException(trans('exceptions.service.variables.reserved_name', [
@@ -56,8 +68,8 @@ class VariableUpdateService
                 ]));
             }
 
-            $search = $this->repository->withColumns('id')->findCountWhere([
-                ['env_variable', '=', array_get($data, 'env_variable')],
+            $search = $this->repository->setColumns('id')->findCountWhere([
+                ['env_variable', '=', $data['env_variable']],
                 ['egg_id', '=', $variable->egg_id],
                 ['id', '!=', $variable->id],
             ]);
@@ -69,11 +81,24 @@ class VariableUpdateService
             }
         }
 
-        $options = array_get($data, 'options', []);
+        if (! empty($data['rules'] ?? '')) {
+            $this->validateRules(
+                (is_string($data['rules']) && Str::contains($data['rules'], ';;'))
+                    ? explode(';;', $data['rules'])
+                    : $data['rules']
+            );
+        }
 
-        return $this->repository->withoutFresh()->update($variable->id, array_merge($data, [
+        $options = array_get($data, 'options') ?? [];
+
+        return $this->repository->withoutFreshModel()->update($variable->id, [
+            'name' => $data['name'] ?? '',
+            'description' => $data['description'] ?? '',
+            'env_variable' => $data['env_variable'] ?? '',
+            'default_value' => $data['default_value'] ?? '',
             'user_viewable' => in_array('user_viewable', $options),
             'user_editable' => in_array('user_editable', $options),
-        ]));
+            'rules' => $data['rules'] ?? '',
+        ]);
     }
 }

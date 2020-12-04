@@ -45,7 +45,7 @@ class EggUpdateImporterServiceTest extends TestCase
     /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -62,7 +62,7 @@ class EggUpdateImporterServiceTest extends TestCase
      */
     public function testEggIsUpdated()
     {
-        $egg = factory(Egg::class)->make();
+        $egg = factory(Egg::class)->make(['id' => 123]);
         $variable = factory(EggVariable::class)->make();
 
         $this->file->shouldReceive('getError')->withNoArgs()->once()->andReturn(UPLOAD_ERR_OK);
@@ -81,17 +81,17 @@ class EggUpdateImporterServiceTest extends TestCase
             'name' => $egg->name,
         ]), true, true)->once()->andReturn($egg);
 
-        $this->variableRepository->shouldReceive('withoutFresh->updateOrCreate')->with([
+        $this->variableRepository->shouldReceive('withoutFreshModel->updateOrCreate')->with([
             'egg_id' => $egg->id,
             'env_variable' => $variable->env_variable,
         ], collect($variable)->except(['egg_id', 'env_variable'])->toArray())->once()->andReturnNull();
 
-        $this->variableRepository->shouldReceive('withColumns')->with(['id', 'env_variable'])->once()->andReturnSelf()
-            ->shouldReceive('findWhere')->with([['egg_id', '=', $egg->id]])->once()->andReturn([$variable]);
+        $this->variableRepository->shouldReceive('setColumns')->with(['id', 'env_variable'])->once()->andReturnSelf()
+            ->shouldReceive('findWhere')->with([['egg_id', '=', $egg->id]])->once()->andReturn(collect([$variable]));
 
         $this->connection->shouldReceive('commit')->withNoArgs()->once()->andReturnNull();
 
-        $this->service->handle($egg->id, $this->file);
+        $this->service->handle($egg, $this->file);
         $this->assertTrue(true);
     }
 
@@ -101,7 +101,7 @@ class EggUpdateImporterServiceTest extends TestCase
      */
     public function testVariablesMissingFromImportAreDeleted()
     {
-        $egg = factory(Egg::class)->make();
+        $egg = factory(Egg::class)->make(['id' => 123]);
         $variable1 = factory(EggVariable::class)->make();
         $variable2 = factory(EggVariable::class)->make();
 
@@ -121,22 +121,22 @@ class EggUpdateImporterServiceTest extends TestCase
             'name' => $egg->name,
         ]), true, true)->once()->andReturn($egg);
 
-        $this->variableRepository->shouldReceive('withoutFresh->updateOrCreate')->with([
+        $this->variableRepository->shouldReceive('withoutFreshModel->updateOrCreate')->with([
             'egg_id' => $egg->id,
             'env_variable' => $variable1->env_variable,
         ], collect($variable1)->except(['egg_id', 'env_variable'])->toArray())->once()->andReturnNull();
 
-        $this->variableRepository->shouldReceive('withColumns')->with(['id', 'env_variable'])->once()->andReturnSelf()
-            ->shouldReceive('findWhere')->with([['egg_id', '=', $egg->id]])->once()->andReturn([$variable1, $variable2]);
+        $this->variableRepository->shouldReceive('setColumns')->with(['id', 'env_variable'])->once()->andReturnSelf()
+            ->shouldReceive('findWhere')->with([['egg_id', '=', $egg->id]])->once()->andReturn(collect([$variable1, $variable2]));
 
         $this->variableRepository->shouldReceive('deleteWhere')->with([
             ['egg_id', '=', $egg->id],
             ['env_variable', '=', $variable2->env_variable],
-        ])->once()->andReturnNull();
+        ])->once()->andReturn(1);
 
         $this->connection->shouldReceive('commit')->withNoArgs()->once()->andReturnNull();
 
-        $this->service->handle($egg->id, $this->file);
+        $this->service->handle($egg, $this->file);
         $this->assertTrue(true);
     }
 
@@ -145,13 +145,13 @@ class EggUpdateImporterServiceTest extends TestCase
      */
     public function testExceptionIsThrownIfFileIsInvalid()
     {
-        $this->file->shouldReceive('getError')->withNoArgs()->once()->andReturn(UPLOAD_ERR_NO_FILE);
-        try {
-            $this->service->handle(1234, $this->file);
-        } catch (PterodactylException $exception) {
-            $this->assertInstanceOf(InvalidFileUploadException::class, $exception);
-            $this->assertEquals(trans('exceptions.nest.importer.file_error'), $exception->getMessage());
-        }
+        $egg = factory(Egg::class)->make(['id' => 123]);
+
+        $this->expectException(InvalidFileUploadException::class);
+        $this->expectExceptionMessageMatches('/^The selected file \["test\.txt"\] was not in a valid format to import\./');
+        $file = new UploadedFile('test.txt', 'original.txt', 'application/json', UPLOAD_ERR_NO_FILE, true);
+
+        $this->service->handle($egg, $file);
     }
 
     /**
@@ -159,15 +159,18 @@ class EggUpdateImporterServiceTest extends TestCase
      */
     public function testExceptionIsThrownIfFileIsNotAFile()
     {
-        $this->file->shouldReceive('getError')->withNoArgs()->once()->andReturn(UPLOAD_ERR_OK);
-        $this->file->shouldReceive('isFile')->withNoArgs()->once()->andReturn(false);
+        $egg = factory(Egg::class)->make(['id' => 123]);
 
-        try {
-            $this->service->handle(1234, $this->file);
-        } catch (PterodactylException $exception) {
-            $this->assertInstanceOf(InvalidFileUploadException::class, $exception);
-            $this->assertEquals(trans('exceptions.nest.importer.file_error'), $exception->getMessage());
-        }
+        $this->expectException(InvalidFileUploadException::class);
+        $this->expectExceptionMessageMatches('/^The selected file \["test\.txt"\] was not in a valid format to import\./');
+
+        $file = m::mock(
+            new UploadedFile('test.txt', 'original.txt', 'application/json', UPLOAD_ERR_INI_SIZE, true)
+        )->makePartial();
+
+        $file->expects('isFile')->andReturnFalse();
+
+        $this->service->handle($egg, $file);
     }
 
     /**
@@ -175,6 +178,8 @@ class EggUpdateImporterServiceTest extends TestCase
      */
     public function testExceptionIsThrownIfJsonMetaDataIsInvalid()
     {
+        $egg = factory(Egg::class)->make(['id' => 123]);
+
         $this->file->shouldReceive('getError')->withNoArgs()->once()->andReturn(UPLOAD_ERR_OK);
         $this->file->shouldReceive('isFile')->withNoArgs()->once()->andReturn(true);
         $this->file->shouldReceive('getSize')->withNoArgs()->once()->andReturn(100);
@@ -183,7 +188,7 @@ class EggUpdateImporterServiceTest extends TestCase
         ]));
 
         try {
-            $this->service->handle(1234, $this->file);
+            $this->service->handle($egg, $this->file);
         } catch (PterodactylException $exception) {
             $this->assertInstanceOf(InvalidFileUploadException::class, $exception);
             $this->assertEquals(trans('exceptions.nest.importer.invalid_json_provided'), $exception->getMessage());
@@ -195,13 +200,15 @@ class EggUpdateImporterServiceTest extends TestCase
      */
     public function testExceptionIsThrownIfBadJsonIsProvided()
     {
+        $egg = factory(Egg::class)->make(['id' => 123]);
+
         $this->file->shouldReceive('getError')->withNoArgs()->once()->andReturn(UPLOAD_ERR_OK);
         $this->file->shouldReceive('isFile')->withNoArgs()->once()->andReturn(true);
         $this->file->shouldReceive('getSize')->withNoArgs()->once()->andReturn(100);
         $this->file->shouldReceive('openFile->fread')->with(100)->once()->andReturn('}');
 
         try {
-            $this->service->handle(1234, $this->file);
+            $this->service->handle($egg, $this->file);
         } catch (PterodactylException $exception) {
             $this->assertInstanceOf(BadJsonFormatException::class, $exception);
             $this->assertEquals(trans('exceptions.nest.importer.json_error', [

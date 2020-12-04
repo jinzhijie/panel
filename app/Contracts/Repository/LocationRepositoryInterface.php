@@ -1,31 +1,25 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Contracts\Repository;
 
-use Pterodactyl\Contracts\Repository\Attributes\SearchableInterface;
+use Pterodactyl\Models\Location;
+use Illuminate\Support\Collection;
 
-interface LocationRepositoryInterface extends RepositoryInterface, SearchableInterface
+interface LocationRepositoryInterface extends RepositoryInterface
 {
     /**
      * Return locations with a count of nodes and servers attached to it.
      *
-     * @return mixed
+     * @return \Illuminate\Support\Collection
      */
-    public function getAllWithDetails();
+    public function getAllWithDetails(): Collection;
 
     /**
      * Return all of the available locations with the nodes as a relationship.
      *
      * @return \Illuminate\Support\Collection
      */
-    public function getAllWithNodes();
+    public function getAllWithNodes(): Collection;
 
     /**
      * Return all of the nodes and their respective count of servers for a location.
@@ -35,7 +29,7 @@ interface LocationRepositoryInterface extends RepositoryInterface, SearchableInt
      *
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function getWithNodes($id);
+    public function getWithNodes(int $id): Location;
 
     /**
      * Return a location and the count of nodes in that location.
@@ -45,5 +39,5 @@ interface LocationRepositoryInterface extends RepositoryInterface, SearchableInt
      *
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function getWithNodeCount($id);
+    public function getWithNodeCount(int $id): Location;
 }

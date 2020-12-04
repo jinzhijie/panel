@@ -30,7 +30,7 @@ class DisableTwoFactorCommandTest extends CommandTestCase
     /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -47,9 +47,9 @@ class DisableTwoFactorCommandTest extends CommandTestCase
     {
         $user = factory(User::class)->make();
 
-        $this->repository->shouldReceive('withColumns')->with(['id', 'email'])->once()->andReturnSelf()
+        $this->repository->shouldReceive('setColumns')->with(['id', 'email'])->once()->andReturnSelf()
             ->shouldReceive('findFirstWhere')->with([['email', '=', $user->email]])->once()->andReturn($user);
-        $this->repository->shouldReceive('withoutFresh')->withNoArgs()->once()->andReturnSelf()
+        $this->repository->shouldReceive('withoutFreshModel')->withNoArgs()->once()->andReturnSelf()
             ->shouldReceive('update')->with($user->id, [
                 'use_totp' => false,
                 'totp_secret' => null,
@@ -58,7 +58,7 @@ class DisableTwoFactorCommandTest extends CommandTestCase
         $display = $this->runCommand($this->command, [], [$user->email]);
 
         $this->assertNotEmpty($display);
-        $this->assertContains(trans('command/messages.user.2fa_disabled', ['email' => $user->email]), $display);
+        $this->assertStringContainsString(trans('command/messages.user.2fa_disabled', ['email' => $user->email]), $display);
     }
 
     /**
@@ -68,9 +68,9 @@ class DisableTwoFactorCommandTest extends CommandTestCase
     {
         $user = factory(User::class)->make();
 
-        $this->repository->shouldReceive('withColumns')->with(['id', 'email'])->once()->andReturnSelf()
+        $this->repository->shouldReceive('setColumns')->with(['id', 'email'])->once()->andReturnSelf()
             ->shouldReceive('findFirstWhere')->with([['email', '=', $user->email]])->once()->andReturn($user);
-        $this->repository->shouldReceive('withoutFresh')->withNoArgs()->once()->andReturnSelf()
+        $this->repository->shouldReceive('withoutFreshModel')->withNoArgs()->once()->andReturnSelf()
             ->shouldReceive('update')->with($user->id, [
                 'use_totp' => false,
                 'totp_secret' => null,
@@ -78,6 +78,6 @@ class DisableTwoFactorCommandTest extends CommandTestCase
 
         $display = $this->withoutInteraction()->runCommand($this->command, ['--email' => $user->email]);
         $this->assertNotEmpty($display);
-        $this->assertContains(trans('command/messages.user.2fa_disabled', ['email' => $user->email]), $display);
+        $this->assertStringContainsString(trans('command/messages.user.2fa_disabled', ['email' => $user->email]), $display);
     }
 }

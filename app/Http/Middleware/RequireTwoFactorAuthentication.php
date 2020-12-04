@@ -10,8 +10,8 @@
 namespace Pterodactyl\Http\Middleware;
 
 use Closure;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
-use Krucas\Settings\Settings;
 use Prologue\Alerts\AlertsMessageBag;
 
 class RequireTwoFactorAuthentication
@@ -26,49 +26,27 @@ class RequireTwoFactorAuthentication
     private $alert;
 
     /**
-     * @var \Krucas\Settings\Settings
-     */
-    private $settings;
-
-    /**
-     * The names of routes that should be accessable without 2FA enabled.
-     *
-     * @var array
-     */
-    protected $except = [
-        'account.security',
-        'account.security.revoke',
-        'account.security.totp',
-        'account.security.totp.set',
-        'account.security.totp.disable',
-        'auth.totp',
-        'auth.logout',
-    ];
-
-    /**
      * The route to redirect a user to to enable 2FA.
      *
      * @var string
      */
-    protected $redirectRoute = 'account.security';
+    protected $redirectRoute = 'account';
 
     /**
      * RequireTwoFactorAuthentication constructor.
      *
      * @param \Prologue\Alerts\AlertsMessageBag $alert
-     * @param \Krucas\Settings\Settings         $settings
      */
-    public function __construct(AlertsMessageBag $alert, Settings $settings)
+    public function __construct(AlertsMessageBag $alert)
     {
         $this->alert = $alert;
-        $this->settings = $settings;
     }
 
     /**
      * Handle an incoming request.
      *
      * @param \Illuminate\Http\Request $request
-     * @param \Closure                 $next
+     * @param \Closure $next
      * @return mixed
      */
     public function handle(Request $request, Closure $next)
@@ -77,14 +55,12 @@ class RequireTwoFactorAuthentication
             return $next($request);
         }
 
-        if (in_array($request->route()->getName(), $this->except)) {
+        $current = $request->route()->getName();
+        if (in_array($current, ['auth', 'account']) || Str::startsWith($current, ['auth.', 'account.'])) {
             return $next($request);
         }
 
-        switch ((int) $this->settings->get('2fa', 0)) {
-            case self::LEVEL_NONE:
-                return $next($request);
-                break;
+        switch ((int) config('pterodactyl.auth.2fa_required')) {
             case self::LEVEL_ADMIN:
                 if (! $request->user()->root_admin || $request->user()->use_totp) {
                     return $next($request);
@@ -95,6 +71,9 @@ class RequireTwoFactorAuthentication
                     return $next($request);
                 }
                 break;
+            case self::LEVEL_NONE:
+            default:
+                return $next($request);
         }
 
         $this->alert->danger(trans('auth.2fa_must_be_enabled'))->flash();

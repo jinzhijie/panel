@@ -1,23 +1,64 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Models;
 
-use Sofa\Eloquence\Eloquence;
-use Sofa\Eloquence\Validable;
-use Illuminate\Database\Eloquent\Model;
-use Sofa\Eloquence\Contracts\CleansAttributes;
-use Sofa\Eloquence\Contracts\Validable as ValidableContract;
-
-class Egg extends Model implements CleansAttributes, ValidableContract
+/**
+ * @property int $id
+ * @property string $uuid
+ * @property int $nest_id
+ * @property string $author
+ * @property string $name
+ * @property string|null $description
+ * @property array|null $features
+ * @property string $docker_image
+ * @property string|null $config_files
+ * @property string|null $config_startup
+ * @property string|null $config_logs
+ * @property string|null $config_stop
+ * @property int|null $config_from
+ * @property string|null $startup
+ * @property bool $script_is_privileged
+ * @property string|null $script_install
+ * @property string $script_entry
+ * @property string $script_container
+ * @property int|null $copy_script_from
+ * @property \Carbon\Carbon $created_at
+ * @property \Carbon\Carbon $updated_at
+ *
+ * @property string|null $copy_script_install
+ * @property string $copy_script_entry
+ * @property string $copy_script_container
+ * @property string|null $inherit_config_files
+ * @property string|null $inherit_config_startup
+ * @property string|null $inherit_config_logs
+ * @property string|null $inherit_config_stop
+ * @property array|null $inherit_features
+ *
+ * @property \Pterodactyl\Models\Nest $nest
+ * @property \Illuminate\Database\Eloquent\Collection|\Pterodactyl\Models\Server[] $servers
+ * @property \Illuminate\Database\Eloquent\Collection|\Pterodactyl\Models\EggVariable[] $variables
+ * @property \Pterodactyl\Models\Egg|null $scriptFrom
+ * @property \Pterodactyl\Models\Egg|null $configFrom
+ */
+class Egg extends Model
 {
-    use Eloquence, Validable;
+    /**
+     * The resource name for this model when it is transformed into an
+     * API representation using fractal.
+     */
+    const RESOURCE_NAME = 'egg';
+
+    /**
+     * Different features that can be enabled on any given egg. These are used internally
+     * to determine which types of frontend functionality should be shown to the user. Eggs
+     * will automatically inherit features from a parent egg if they are already configured
+     * to copy configuration values from said egg.
+     *
+     * To skip copying the features, an empty array value should be passed in ("[]") rather
+     * than leaving it null.
+     */
+    const FEATURE_EULA_POPUP = 'eula';
+    const FEATURE_FASTDL = 'fastdl';
 
     /**
      * The table associated with the model.
@@ -34,6 +75,7 @@ class Egg extends Model implements CleansAttributes, ValidableContract
     protected $fillable = [
         'name',
         'description',
+        'features',
         'docker_image',
         'config_files',
         'config_startup',
@@ -58,48 +100,33 @@ class Egg extends Model implements CleansAttributes, ValidableContract
         'config_from' => 'integer',
         'script_is_privileged' => 'boolean',
         'copy_script_from' => 'integer',
+        'features' => 'array',
     ];
 
     /**
      * @var array
      */
-    protected static $applicationRules = [
-        'nest_id' => 'required',
-        'uuid' => 'required',
-        'name' => 'required',
-        'description' => 'required',
-        'author' => 'required',
-        'docker_image' => 'required',
-        'startup' => 'required',
-        'config_from' => 'sometimes',
-        'config_stop' => 'required_without:config_from',
-        'config_startup' => 'required_without:config_from',
-        'config_logs' => 'required_without:config_from',
-        'config_files' => 'required_without:config_from',
-    ];
-
-    /**
-     * @var array
-     */
-    protected static $dataIntegrityRules = [
-        'nest_id' => 'bail|numeric|exists:nests,id',
-        'uuid' => 'string|size:36',
-        'name' => 'string|max:255',
-        'description' => 'string',
-        'author' => 'string|email',
-        'docker_image' => 'string|max:255',
-        'startup' => 'nullable|string',
-        'config_from' => 'bail|nullable|numeric|exists:eggs,id',
-        'config_stop' => 'nullable|string|max:255',
-        'config_startup' => 'nullable|json',
-        'config_logs' => 'nullable|json',
-        'config_files' => 'nullable|json',
+    public static $validationRules = [
+        'nest_id' => 'required|bail|numeric|exists:nests,id',
+        'uuid' => 'required|string|size:36',
+        'name' => 'required|string|max:191',
+        'description' => 'string|nullable',
+        'features' => 'array|nullable',
+        'author' => 'required|string|email',
+        'docker_image' => 'required|string|max:191',
+        'startup' => 'required|nullable|string',
+        'config_from' => 'sometimes|bail|nullable|numeric|exists:eggs,id',
+        'config_stop' => 'required_without:config_from|nullable|string|max:191',
+        'config_startup' => 'required_without:config_from|nullable|json',
+        'config_logs' => 'required_without:config_from|nullable|json',
+        'config_files' => 'required_without:config_from|nullable|json',
     ];
 
     /**
      * @var array
      */
     protected $attributes = [
+        'features' => null,
         'config_stop' => null,
         'config_startup' => null,
         'config_logs' => null,
@@ -114,7 +141,11 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getCopyScriptInstallAttribute()
     {
-        return (is_null($this->copy_script_from)) ? $this->script_install : $this->scriptFrom->script_install;
+        if (! is_null($this->script_install) || is_null($this->copy_script_from)) {
+            return $this->script_install;
+        }
+
+        return $this->scriptFrom->script_install;
     }
 
     /**
@@ -125,7 +156,11 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getCopyScriptEntryAttribute()
     {
-        return (is_null($this->copy_script_from)) ? $this->script_entry : $this->scriptFrom->script_entry;
+        if (! is_null($this->script_entry) || is_null($this->copy_script_from)) {
+            return $this->script_entry;
+        }
+
+        return $this->scriptFrom->script_entry;
     }
 
     /**
@@ -136,7 +171,11 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getCopyScriptContainerAttribute()
     {
-        return (is_null($this->copy_script_from)) ? $this->script_container : $this->scriptFrom->script_container;
+        if (! is_null($this->script_container) || is_null($this->copy_script_from)) {
+            return $this->script_container;
+        }
+
+        return $this->scriptFrom->script_container;
     }
 
     /**
@@ -146,7 +185,11 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getInheritConfigFilesAttribute()
     {
-        return is_null($this->config_from) ? $this->config_files : $this->configFrom->config_files;
+        if (! is_null($this->config_files) || is_null($this->config_from)) {
+            return $this->config_files;
+        }
+
+        return $this->configFrom->config_files;
     }
 
     /**
@@ -156,7 +199,11 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getInheritConfigStartupAttribute()
     {
-        return is_null($this->config_from) ? $this->config_startup : $this->configFrom->config_startup;
+        if (! is_null($this->config_startup) || is_null($this->config_from)) {
+            return $this->config_startup;
+        }
+
+        return $this->configFrom->config_startup;
     }
 
     /**
@@ -166,7 +213,11 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getInheritConfigLogsAttribute()
     {
-        return is_null($this->config_from) ? $this->config_logs : $this->configFrom->config_logs;
+        if (! is_null($this->config_logs) || is_null($this->config_from)) {
+            return $this->config_logs;
+        }
+
+        return $this->configFrom->config_logs;
     }
 
     /**
@@ -176,7 +227,26 @@ class Egg extends Model implements CleansAttributes, ValidableContract
      */
     public function getInheritConfigStopAttribute()
     {
-        return is_null($this->config_from) ? $this->config_stop : $this->configFrom->config_stop;
+        if (! is_null($this->config_stop) || is_null($this->config_from)) {
+            return $this->config_stop;
+        }
+
+        return $this->configFrom->config_stop;
+    }
+
+    /**
+     * Returns the features available to this egg from the parent configuration if there are
+     * no features defined for this egg specifically and there is a parent egg configured.
+     *
+     * @return array|null
+     */
+    public function getInheritFeaturesAttribute()
+    {
+        if (! is_null($this->features) || is_null($this->config_from)) {
+            return $this->features;
+        }
+
+        return $this->configFrom->features;
     }
 
     /**
@@ -207,16 +277,6 @@ class Egg extends Model implements CleansAttributes, ValidableContract
     public function variables()
     {
         return $this->hasMany(EggVariable::class, 'egg_id');
-    }
-
-    /**
-     * Gets all packs associated with this egg.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
-     */
-    public function packs()
-    {
-        return $this->hasMany(Pack::class, 'egg_id');
     }
 
     /**

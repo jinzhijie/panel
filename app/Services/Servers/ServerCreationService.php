@@ -3,24 +3,29 @@
 namespace Pterodactyl\Services\Servers;
 
 use Ramsey\Uuid\Uuid;
-use Pterodactyl\Models\Node;
+use Illuminate\Support\Arr;
+use Pterodactyl\Models\Egg;
 use Pterodactyl\Models\User;
-use GuzzleHttp\Exception\RequestException;
+use Webmozart\Assert\Assert;
+use Pterodactyl\Models\Server;
+use Illuminate\Support\Collection;
+use Pterodactyl\Models\Allocation;
 use Illuminate\Database\ConnectionInterface;
-use Pterodactyl\Contracts\Repository\NodeRepositoryInterface;
-use Pterodactyl\Contracts\Repository\UserRepositoryInterface;
-use Pterodactyl\Contracts\Repository\ServerRepositoryInterface;
-use Pterodactyl\Contracts\Repository\AllocationRepositoryInterface;
+use Pterodactyl\Models\Objects\DeploymentObject;
+use Pterodactyl\Repositories\Eloquent\EggRepository;
+use Pterodactyl\Repositories\Eloquent\ServerRepository;
+use Pterodactyl\Repositories\Wings\DaemonServerRepository;
+use Pterodactyl\Services\Deployment\FindViableNodesService;
+use Pterodactyl\Repositories\Eloquent\ServerVariableRepository;
+use Pterodactyl\Services\Deployment\AllocationSelectionService;
 use Pterodactyl\Exceptions\Http\Connection\DaemonConnectionException;
-use Pterodactyl\Contracts\Repository\ServerVariableRepositoryInterface;
-use Pterodactyl\Contracts\Repository\Daemon\ServerRepositoryInterface as DaemonServerRepositoryInterface;
 
 class ServerCreationService
 {
     /**
-     * @var \Pterodactyl\Contracts\Repository\AllocationRepositoryInterface
+     * @var \Pterodactyl\Services\Deployment\AllocationSelectionService
      */
-    private $allocationRepository;
+    private $allocationSelectionService;
 
     /**
      * @var \Pterodactyl\Services\Servers\ServerConfigurationStructureService
@@ -33,29 +38,9 @@ class ServerCreationService
     private $connection;
 
     /**
-     * @var \Pterodactyl\Contracts\Repository\Daemon\ServerRepositoryInterface
+     * @var \Pterodactyl\Services\Deployment\FindViableNodesService
      */
-    private $daemonServerRepository;
-
-    /**
-     * @var \Pterodactyl\Contracts\Repository\NodeRepositoryInterface
-     */
-    private $nodeRepository;
-
-    /**
-     * @var \Pterodactyl\Contracts\Repository\ServerRepositoryInterface
-     */
-    private $repository;
-
-    /**
-     * @var \Pterodactyl\Contracts\Repository\ServerVariableRepositoryInterface
-     */
-    private $serverVariableRepository;
-
-    /**
-     * @var \Pterodactyl\Contracts\Repository\UserRepositoryInterface
-     */
-    private $userRepository;
+    private $findViableNodesService;
 
     /**
      * @var \Pterodactyl\Services\Servers\VariableValidatorService
@@ -63,92 +48,236 @@ class ServerCreationService
     private $validatorService;
 
     /**
+     * @var \Pterodactyl\Repositories\Eloquent\EggRepository
+     */
+    private $eggRepository;
+
+    /**
+     * @var \Pterodactyl\Repositories\Eloquent\ServerRepository
+     */
+    private $repository;
+
+    /**
+     * @var \Pterodactyl\Repositories\Eloquent\ServerVariableRepository
+     */
+    private $serverVariableRepository;
+
+    /**
+     * @var \Pterodactyl\Repositories\Wings\DaemonServerRepository
+     */
+    private $daemonServerRepository;
+
+    /**
+     * @var \Pterodactyl\Services\Servers\ServerDeletionService
+     */
+    private $serverDeletionService;
+
+    /**
      * CreationService constructor.
      *
-     * @param \Pterodactyl\Contracts\Repository\AllocationRepositoryInterface     $allocationRepository
-     * @param \Illuminate\Database\ConnectionInterface                            $connection
-     * @param \Pterodactyl\Contracts\Repository\Daemon\ServerRepositoryInterface  $daemonServerRepository
-     * @param \Pterodactyl\Contracts\Repository\NodeRepositoryInterface           $nodeRepository
-     * @param \Pterodactyl\Services\Servers\ServerConfigurationStructureService   $configurationStructureService
-     * @param \Pterodactyl\Contracts\Repository\ServerRepositoryInterface         $repository
-     * @param \Pterodactyl\Contracts\Repository\ServerVariableRepositoryInterface $serverVariableRepository
-     * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface           $userRepository
-     * @param \Pterodactyl\Services\Servers\VariableValidatorService              $validatorService
+     * @param \Pterodactyl\Services\Deployment\AllocationSelectionService $allocationSelectionService
+     * @param \Illuminate\Database\ConnectionInterface $connection
+     * @param \Pterodactyl\Repositories\Wings\DaemonServerRepository $daemonServerRepository
+     * @param \Pterodactyl\Repositories\Eloquent\EggRepository $eggRepository
+     * @param \Pterodactyl\Services\Deployment\FindViableNodesService $findViableNodesService
+     * @param \Pterodactyl\Services\Servers\ServerConfigurationStructureService $configurationStructureService
+     * @param \Pterodactyl\Services\Servers\ServerDeletionService $serverDeletionService
+     * @param \Pterodactyl\Repositories\Eloquent\ServerRepository $repository
+     * @param \Pterodactyl\Repositories\Eloquent\ServerVariableRepository $serverVariableRepository
+     * @param \Pterodactyl\Services\Servers\VariableValidatorService $validatorService
      */
     public function __construct(
-        AllocationRepositoryInterface $allocationRepository,
+        AllocationSelectionService $allocationSelectionService,
         ConnectionInterface $connection,
-        DaemonServerRepositoryInterface $daemonServerRepository,
-        NodeRepositoryInterface $nodeRepository,
+        DaemonServerRepository $daemonServerRepository,
+        EggRepository $eggRepository,
+        FindViableNodesService $findViableNodesService,
         ServerConfigurationStructureService $configurationStructureService,
-        ServerRepositoryInterface $repository,
-        ServerVariableRepositoryInterface $serverVariableRepository,
-        UserRepositoryInterface $userRepository,
+        ServerDeletionService $serverDeletionService,
+        ServerRepository $repository,
+        ServerVariableRepository $serverVariableRepository,
         VariableValidatorService $validatorService
     ) {
-        $this->allocationRepository = $allocationRepository;
+        $this->allocationSelectionService = $allocationSelectionService;
         $this->configurationStructureService = $configurationStructureService;
         $this->connection = $connection;
-        $this->daemonServerRepository = $daemonServerRepository;
-        $this->nodeRepository = $nodeRepository;
+        $this->findViableNodesService = $findViableNodesService;
+        $this->validatorService = $validatorService;
+        $this->eggRepository = $eggRepository;
         $this->repository = $repository;
         $this->serverVariableRepository = $serverVariableRepository;
-        $this->userRepository = $userRepository;
-        $this->validatorService = $validatorService;
+        $this->daemonServerRepository = $daemonServerRepository;
+        $this->serverDeletionService = $serverDeletionService;
     }
 
     /**
-     * Create a server on both the panel and daemon.
+     * Create a server on the Panel and trigger a request to the Daemon to begin the server
+     * creation process. This function will attempt to set as many additional values
+     * as possible given the input data. For example, if an allocation_id is passed with
+     * no node_id the node_is will be picked from the allocation.
      *
      * @param array $data
-     * @return mixed
+     * @param \Pterodactyl\Models\Objects\DeploymentObject|null $deployment
+     * @return \Pterodactyl\Models\Server
      *
+     * @throws \Throwable
      * @throws \Pterodactyl\Exceptions\DisplayException
-     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
+     * @throws \Illuminate\Validation\ValidationException
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     * @throws \Pterodactyl\Exceptions\Service\Deployment\NoViableNodeException
+     * @throws \Pterodactyl\Exceptions\Service\Deployment\NoViableAllocationException
      */
-    public function create(array $data)
+    public function handle(array $data, DeploymentObject $deployment = null): Server
     {
-        // @todo auto-deployment
+        // If a deployment object has been passed we need to get the allocation
+        // that the server should use, and assign the node from that allocation.
+        if ($deployment instanceof DeploymentObject) {
+            $allocation = $this->configureDeployment($data, $deployment);
+            $data['allocation_id'] = $allocation->id;
+            $data['node_id'] = $allocation->node_id;
+        }
 
-        $this->connection->beginTransaction();
-        $server = $this->repository->create([
-            'uuid' => Uuid::uuid4()->toString(),
-            'uuidShort' => str_random(8),
-            'node_id' => array_get($data, 'node_id'),
-            'name' => array_get($data, 'name'),
-            'description' => array_get($data, 'description'),
-            'skip_scripts' => isset($data['skip_scripts']),
+        // Auto-configure the node based on the selected allocation
+        // if no node was defined.
+        if (empty($data['node_id'])) {
+            Assert::false(empty($data['allocation_id']), 'Expected a non-empty allocation_id in server creation data.');
+
+            $data['node_id'] = Allocation::query()->findOrFail($data['allocation_id'])->node_id;
+        }
+
+        if (empty($data['nest_id'])) {
+            Assert::false(empty($data['egg_id']), 'Expected a non-empty egg_id in server creation data.');
+
+            $data['nest_id'] = Egg::query()->findOrFail($data['egg_id'])->nest_id;
+        }
+
+        $eggVariableData = $this->validatorService
+            ->setUserLevel(User::USER_LEVEL_ADMIN)
+            ->handle(Arr::get($data, 'egg_id'), Arr::get($data, 'environment', []));
+
+        // Due to the design of the Daemon, we need to persist this server to the disk
+        // before we can actually create it on the Daemon.
+        //
+        // If that connection fails out we will attempt to perform a cleanup by just
+        // deleting the server itself from the system.
+        /** @var \Pterodactyl\Models\Server $server */
+        $server = $this->connection->transaction(function () use ($data, $eggVariableData) {
+            // Create the server and assign any additional allocations to it.
+            $server = $this->createModel($data);
+
+            $this->storeAssignedAllocations($server, $data);
+            $this->storeEggVariables($server, $eggVariableData);
+
+            return $server;
+        }, 5);
+
+        try {
+            $this->daemonServerRepository->setServer($server)->create(
+                $this->configurationStructureService->handle($server)
+            );
+        } catch (DaemonConnectionException $exception) {
+            $this->serverDeletionService->withForce(true)->handle($server);
+
+            throw $exception;
+        }
+
+        return $server;
+    }
+
+    /**
+     * Gets an allocation to use for automatic deployment.
+     *
+     * @param array $data
+     * @param \Pterodactyl\Models\Objects\DeploymentObject $deployment
+     *
+     * @return \Pterodactyl\Models\Allocation
+     * @throws \Pterodactyl\Exceptions\DisplayException
+     * @throws \Pterodactyl\Exceptions\Service\Deployment\NoViableAllocationException
+     * @throws \Pterodactyl\Exceptions\Service\Deployment\NoViableNodeException
+     */
+    private function configureDeployment(array $data, DeploymentObject $deployment): Allocation
+    {
+        $nodes = $this->findViableNodesService->setLocations($deployment->getLocations())
+            ->setDisk(Arr::get($data, 'disk'))
+            ->setMemory(Arr::get($data, 'memory'))
+            ->handle();
+
+        return $this->allocationSelectionService->setDedicated($deployment->isDedicated())
+            ->setNodes($nodes->pluck('id')->toArray())
+            ->setPorts($deployment->getPorts())
+            ->handle();
+    }
+
+    /**
+     * Store the server in the database and return the model.
+     *
+     * @param array $data
+     * @return \Pterodactyl\Models\Server
+     *
+     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
+     */
+    private function createModel(array $data): Server
+    {
+        $uuid = $this->generateUniqueUuidCombo();
+
+        /** @var \Pterodactyl\Models\Server $model */
+        $model = $this->repository->create([
+            'external_id' => Arr::get($data, 'external_id'),
+            'uuid' => $uuid,
+            'uuidShort' => substr($uuid, 0, 8),
+            'node_id' => Arr::get($data, 'node_id'),
+            'name' => Arr::get($data, 'name'),
+            'description' => Arr::get($data, 'description') ?? '',
+            'skip_scripts' => Arr::get($data, 'skip_scripts') ?? isset($data['skip_scripts']),
             'suspended' => false,
-            'owner_id' => array_get($data, 'owner_id'),
-            'memory' => array_get($data, 'memory'),
-            'swap' => array_get($data, 'swap'),
-            'disk' => array_get($data, 'disk'),
-            'io' => array_get($data, 'io'),
-            'cpu' => array_get($data, 'cpu'),
-            'oom_disabled' => isset($data['oom_disabled']),
-            'allocation_id' => array_get($data, 'allocation_id'),
-            'nest_id' => array_get($data, 'nest_id'),
-            'egg_id' => array_get($data, 'egg_id'),
-            'pack_id' => (! isset($data['pack_id']) || $data['pack_id'] == 0) ? null : $data['pack_id'],
-            'startup' => array_get($data, 'startup'),
-            'daemonSecret' => str_random(Node::DAEMON_SECRET_LENGTH),
-            'image' => array_get($data, 'docker_image'),
+            'owner_id' => Arr::get($data, 'owner_id'),
+            'memory' => Arr::get($data, 'memory'),
+            'swap' => Arr::get($data, 'swap'),
+            'disk' => Arr::get($data, 'disk'),
+            'io' => Arr::get($data, 'io'),
+            'cpu' => Arr::get($data, 'cpu'),
+            'threads' => Arr::get($data, 'threads'),
+            'oom_disabled' => Arr::get($data, 'oom_disabled') ?? true,
+            'allocation_id' => Arr::get($data, 'allocation_id'),
+            'nest_id' => Arr::get($data, 'nest_id'),
+            'egg_id' => Arr::get($data, 'egg_id'),
+            'startup' => Arr::get($data, 'startup'),
+            'image' => Arr::get($data, 'image'),
+            'database_limit' => Arr::get($data, 'database_limit') ?? 0,
+            'allocation_limit' => Arr::get($data, 'allocation_limit') ?? 0,
+            'backup_limit' => Arr::get($data, 'backup_limit') ?? 0,
         ]);
 
-        // Process allocations and assign them to the server in the database.
+        return $model;
+    }
+
+    /**
+     * Configure the allocations assigned to this server.
+     *
+     * @param \Pterodactyl\Models\Server $server
+     * @param array $data
+     */
+    private function storeAssignedAllocations(Server $server, array $data)
+    {
         $records = [$data['allocation_id']];
         if (isset($data['allocation_additional']) && is_array($data['allocation_additional'])) {
             $records = array_merge($records, $data['allocation_additional']);
         }
 
-        $this->allocationRepository->assignAllocationsToServer($server->id, $records);
+        Allocation::query()->whereIn('id', $records)->update([
+            'server_id' => $server->id,
+        ]);
+    }
 
-        // Process the passed variables and store them in the database.
-        $this->validatorService->setUserLevel(User::USER_LEVEL_ADMIN);
-        $results = $this->validatorService->handle(array_get($data, 'egg_id'), array_get($data, 'environment', []));
-
-        $records = $results->map(function ($result) use ($server) {
+    /**
+     * Process environment variables passed for this server and store them in the database.
+     *
+     * @param \Pterodactyl\Models\Server $server
+     * @param \Illuminate\Support\Collection $variables
+     */
+    private function storeEggVariables(Server $server, Collection $variables)
+    {
+        $records = $variables->map(function ($result) use ($server) {
             return [
                 'server_id' => $server->id,
                 'variable_id' => $result->id,
@@ -159,19 +288,21 @@ class ServerCreationService
         if (! empty($records)) {
             $this->serverVariableRepository->insert($records);
         }
-        $structure = $this->configurationStructureService->handle($server);
+    }
 
-        // Create the server on the daemon & commit it to the database.
-        try {
-            $this->daemonServerRepository->setNode($server->node_id)->create($structure, [
-                'start_on_completion' => (bool) array_get($data, 'start_on_completion', false),
-            ]);
-            $this->connection->commit();
-        } catch (RequestException $exception) {
-            $this->connection->rollBack();
-            throw new DaemonConnectionException($exception);
+    /**
+     * Create a unique UUID and UUID-Short combo for a server.
+     *
+     * @return string
+     */
+    private function generateUniqueUuidCombo(): string
+    {
+        $uuid = Uuid::uuid4()->toString();
+
+        if (! $this->repository->isUniqueUuidCombo($uuid, substr($uuid, 0, 8))) {
+            return $this->generateUniqueUuidCombo();
         }
 
-        return $server;
+        return $uuid;
     }
 }

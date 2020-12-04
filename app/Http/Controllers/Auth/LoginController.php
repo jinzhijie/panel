@@ -1,230 +1,118 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>
- * Some Modifications (c) 2015 Dylan Seidt <dylan.seidt@gmail.com>.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
 
 namespace Pterodactyl\Http\Controllers\Auth;
 
-use Auth;
-use Cache;
-use Crypt;
+use Cake\Chronos\Chronos;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
-use Pterodactyl\Models\User;
-use PragmaRX\Google2FA\Google2FA;
-use Pterodactyl\Http\Controllers\Controller;
-use Illuminate\Foundation\Auth\AuthenticatesUsers;
+use Illuminate\Auth\AuthManager;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Contracts\View\View;
+use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\View\Factory as ViewFactory;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use Pterodactyl\Contracts\Repository\UserRepositoryInterface;
+use Pterodactyl\Exceptions\Repository\RecordNotFoundException;
 
-class LoginController extends Controller
+class LoginController extends AbstractLoginController
 {
-    /*
-    |--------------------------------------------------------------------------
-    | Login Controller
-    |--------------------------------------------------------------------------
-    |
-    | This controller handles authenticating users for the application and
-    | redirecting them to your home screen. The controller uses a trait
-    | to conveniently provide its functionality to your applications.
-    |
-    */
-    use AuthenticatesUsers;
+    /**
+     * @var \Illuminate\Contracts\View\Factory
+     */
+    private $view;
 
     /**
-     * Where to redirect users after login / registration.
+     * @var \Illuminate\Contracts\Cache\Repository
+     */
+    private $cache;
+
+    /**
+     * @var \Pterodactyl\Contracts\Repository\UserRepositoryInterface
+     */
+    private $repository;
+
+    /**
+     * LoginController constructor.
      *
-     * @var string
+     * @param \Illuminate\Auth\AuthManager $auth
+     * @param \Illuminate\Contracts\Config\Repository $config
+     * @param \Illuminate\Contracts\Cache\Repository $cache
+     * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface $repository
+     * @param \Illuminate\Contracts\View\Factory $view
      */
-    protected $redirectTo = '/';
+    public function __construct(
+        AuthManager $auth,
+        Repository $config,
+        CacheRepository $cache,
+        UserRepositoryInterface $repository,
+        ViewFactory $view
+    ) {
+        parent::__construct($auth, $config);
 
-    /**
-     * Lockout time for failed login requests.
-     *
-     * @var int
-     */
-    protected $lockoutTime = 120;
-
-    /**
-     * After how many attempts should logins be throttled and locked.
-     *
-     * @var int
-     */
-    protected $maxLoginAttempts = 3;
-
-    /**
-     * Create a new controller instance.
-     */
-    public function __construct()
-    {
-        $this->middleware('guest', ['except' => 'logout']);
+        $this->view = $view;
+        $this->cache = $cache;
+        $this->repository = $repository;
     }
 
     /**
-     * Get the failed login response instance.
+     * Handle all incoming requests for the authentication routes and render the
+     * base authentication view component. Vuejs will take over at this point and
+     * turn the login area into a SPA.
      *
-     * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @return \Illuminate\Contracts\View\View
      */
-    protected function sendFailedLoginResponse(Request $request)
+    public function index(): View
     {
-        $this->incrementLoginAttempts($request);
-
-        $errors = [$this->username() => trans('auth.failed')];
-
-        if ($request->expectsJson()) {
-            return response()->json($errors, 422);
-        }
-
-        return redirect()->route('auth.login')
-            ->withInput($request->only($this->username(), 'remember'))
-            ->withErrors($errors);
+        return $this->view->make('templates/auth.core');
     }
 
     /**
      * Handle a login request to the application.
      *
      * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response|\Illuminate\Response\RedirectResponse
+     * @return \Illuminate\Http\JsonResponse|void
+     *
+     * @throws \Pterodactyl\Exceptions\DisplayException
+     * @throws \Illuminate\Validation\ValidationException
      */
-    public function login(Request $request)
+    public function login(Request $request): JsonResponse
     {
-        // Check wether the user identifier is an email address or a username
-        $checkField = str_contains($request->input('user'), '@') ? 'email' : 'username';
+        $username = $request->input('user');
+        $useColumn = $this->getField($username);
 
         if ($this->hasTooManyLoginAttempts($request)) {
             $this->fireLockoutEvent($request);
-
-            return $this->sendLockoutResponse($request);
-        }
-
-        // Determine if the user even exists.
-        $user = User::where($checkField, $request->input($this->username()))->first();
-        if (! $user) {
-            return $this->sendFailedLoginResponse($request);
-        }
-
-        // If user uses 2FA, redirect to that page.
-        if ($user->use_totp) {
-            $token = str_random(64);
-            Cache::put($token, [
-                'user_id' => $user->id,
-                'credentials' => Crypt::encrypt(serialize([
-                    $checkField => $request->input($this->username()),
-                    'password' => $request->input('password'),
-                ])),
-            ], 5);
-
-            return redirect()->route('auth.totp')
-                ->with('authentication_token', $token)
-                ->with('remember', $request->has('remember'));
-        }
-
-        $attempt = Auth::attempt([
-            $checkField => $request->input($this->username()),
-            'password' => $request->input('password'),
-            'use_totp' => 0,
-        ], $request->has('remember'));
-
-        if ($attempt) {
-            return $this->sendLoginResponse($request);
-        }
-
-        // Login failed, send response.
-        return $this->sendFailedLoginResponse($request);
-    }
-
-    /**
-     * Handle a TOTP implementation page.
-     *
-     * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\RedirectResponse|\Illuminate\View\View
-     */
-    public function totp(Request $request)
-    {
-        $token = $request->session()->get('authentication_token');
-
-        if (is_null($token) || Auth::user()) {
-            return redirect()->route('auth.login');
-        }
-
-        return view('auth.totp', [
-            'verify_key' => $token,
-            'remember' => $request->session()->get('remember'),
-        ]);
-    }
-
-    /**
-     * Handle a TOTP input.
-     *
-     * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\RedirectResponse
-     */
-    public function totpCheckpoint(Request $request)
-    {
-        $G2FA = new Google2FA();
-
-        if (is_null($request->input('verify_token'))) {
-            return $this->sendFailedLoginResponse($request);
-        }
-
-        $cache = Cache::pull($request->input('verify_token'));
-        $user = User::where('id', $cache['user_id'])->first();
-
-        if (! $user || ! $cache) {
-            $this->sendFailedLoginResponse($request);
-        }
-
-        if (is_null($request->input('2fa_token'))) {
-            return $this->sendFailedLoginResponse($request);
+            $this->sendLockoutResponse($request);
         }
 
         try {
-            $credentials = unserialize(Crypt::decrypt($cache['credentials']));
-        } catch (\Illuminate\Contracts\Encryption\DecryptException $ex) {
+            $user = $this->repository->findFirstWhere([[$useColumn, '=', $username]]);
+        } catch (RecordNotFoundException $exception) {
             return $this->sendFailedLoginResponse($request);
         }
 
-        if (! $G2FA->verifyKey($user->totp_secret, $request->input('2fa_token'), 2)) {
-            event(new \Illuminate\Auth\Events\Failed($user, $credentials));
-
-            return $this->sendFailedLoginResponse($request);
+        // Ensure that the account is using a valid username and password before trying to
+        // continue. Previously this was handled in the 2FA checkpoint, however that has
+        // a flaw in which you can discover if an account exists simply by seeing if you
+        // can proceede to the next step in the login process.
+        if (! password_verify($request->input('password'), $user->password)) {
+            return $this->sendFailedLoginResponse($request, $user);
         }
 
-        $attempt = Auth::attempt($credentials, $request->has('remember'));
+        if ($user->use_totp) {
+            $token = Str::random(64);
+            $this->cache->put($token, $user->id, Chronos::now()->addMinutes(5));
 
-        if ($attempt) {
-            return $this->sendLoginResponse($request);
+            return new JsonResponse([
+                'data' => [
+                    'complete' => false,
+                    'confirmation_token' => $token,
+                ],
+            ]);
         }
 
-        // Login failed, send response.
-        return $this->sendFailedLoginResponse($request);
-    }
+        $this->auth->guard()->login($user, true);
 
-    /**
-     * Get the login username to be used by the controller.
-     *
-     * @return string
-     */
-    public function username()
-    {
-        return 'user';
+        return $this->sendLoginResponse($user, $request);
     }
 }

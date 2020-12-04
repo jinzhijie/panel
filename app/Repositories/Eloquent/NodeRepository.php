@@ -1,25 +1,19 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Repositories\Eloquent;
 
 use Pterodactyl\Models\Node;
-use Pterodactyl\Repositories\Concerns\Searchable;
+use Illuminate\Support\Collection;
+use Illuminate\Support\LazyCollection;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Pterodactyl\Contracts\Repository\NodeRepositoryInterface;
-use Pterodactyl\Exceptions\Repository\RecordNotFoundException;
 
 class NodeRepository extends EloquentRepository implements NodeRepositoryInterface
 {
-    use Searchable;
-
     /**
-     * {@inheritdoc}
+     * Return the model backing this repository.
+     *
+     * @return string
      */
     public function model()
     {
@@ -27,22 +21,20 @@ class NodeRepository extends EloquentRepository implements NodeRepositoryInterfa
     }
 
     /**
-     * {@inheritdoc}
+     * Return the usage stats for a single node.
+     *
+     * @param \Pterodactyl\Models\Node $node
+     * @return array
      */
-    public function getUsageStats($id)
+    public function getUsageStats(Node $node): array
     {
-        $node = $this->getBuilder()->select([
-            'nodes.disk_overallocate',
-            'nodes.memory_overallocate',
-            'nodes.disk',
-            'nodes.memory',
-        ])->where('id', $id)->first();
+        $stats = $this->getBuilder()
+            ->selectRaw('IFNULL(SUM(servers.memory), 0) as sum_memory, IFNULL(SUM(servers.disk), 0) as sum_disk')
+            ->join('servers', 'servers.node_id', '=', 'nodes.id')
+            ->where('node_id', '=', $node->id)
+            ->first();
 
-        $stats = $this->getBuilder()->select(
-            $this->getBuilder()->raw('IFNULL(SUM(servers.memory), 0) as sum_memory, IFNULL(SUM(servers.disk), 0) as sum_disk')
-        )->join('servers', 'servers.node_id', '=', 'nodes.id')->where('node_id', $id)->first();
-
-        return collect(['disk' => $stats->sum_disk, 'memory' => $stats->sum_memory])
+        return Collection::make(['disk' => $stats->sum_disk, 'memory' => $stats->sum_memory])
             ->mapWithKeys(function ($value, $key) use ($node) {
                 $maxUsage = $node->{$key};
                 if ($node->{$key . '_overallocate'} > 0) {
@@ -56,7 +48,7 @@ class NodeRepository extends EloquentRepository implements NodeRepositoryInterfa
                         'value' => number_format($value),
                         'max' => number_format($maxUsage),
                         'percent' => $percent,
-                        'css' => ($percent <= 75) ? 'green' : (($percent > 90) ? 'red' : 'yellow'),
+                        'css' => ($percent <= self::THRESHOLD_PERCENTAGE_LOW) ? 'green' : (($percent > self::THRESHOLD_PERCENTAGE_MEDIUM) ? 'red' : 'yellow'),
                     ],
                 ];
             })
@@ -64,76 +56,87 @@ class NodeRepository extends EloquentRepository implements NodeRepositoryInterfa
     }
 
     /**
-     * {@inheritdoc}
+     * Return the usage stats for a single node.
+     *
+     * @param \Pterodactyl\Models\Node $node
+     * @return array
      */
-    public function getNodeListingData($count = 25)
+    public function getUsageStatsRaw(Node $node): array
     {
-        $instance = $this->getBuilder()->with('location')->withCount('servers');
+        $stats = $this->getBuilder()->select(
+            $this->getBuilder()->raw('IFNULL(SUM(servers.memory), 0) as sum_memory, IFNULL(SUM(servers.disk), 0) as sum_disk')
+        )->join('servers', 'servers.node_id', '=', 'nodes.id')->where('node_id', $node->id)->first();
 
-        if ($this->searchTerm) {
-            $instance->search($this->searchTerm);
-        }
+        return collect(['disk' => $stats->sum_disk, 'memory' => $stats->sum_memory])->mapWithKeys(function ($value, $key) use ($node) {
+            $maxUsage = $node->{$key};
+            if ($node->{$key . '_overallocate'} > 0) {
+                $maxUsage = $node->{$key} * (1 + ($node->{$key . '_overallocate'} / 100));
+            }
 
-        return $instance->paginate($count, $this->getColumns());
+            return [
+                $key => [
+                    'value' => $value,
+                    'max' => $maxUsage,
+                ],
+            ];
+        })->toArray();
     }
 
     /**
-     * {@inheritdoc}
+     * Return a single node with location and server information.
+     *
+     * @param \Pterodactyl\Models\Node $node
+     * @param bool $refresh
+     * @return \Pterodactyl\Models\Node
      */
-    public function getSingleNode($id)
+    public function loadLocationAndServerCount(Node $node, bool $refresh = false): Node
     {
-        $instance = $this->getBuilder()->with('location')->withCount('servers')->find($id, $this->getColumns());
-
-        if (! $instance) {
-            throw new RecordNotFoundException();
+        if (! $node->relationLoaded('location') || $refresh) {
+            $node->load('location');
         }
 
-        return $instance;
+        // This is quite ugly and can probably be improved down the road.
+        // And by probably, I mean it should.
+        if (is_null($node->servers_count) || $refresh) {
+            $node->load('servers');
+            $node->setRelation('servers_count', count($node->getRelation('servers')));
+            unset($node->servers);
+        }
+
+        return $node;
     }
 
     /**
-     * {@inheritdoc}
+     * Attach a paginated set of allocations to a node mode including
+     * any servers that are also attached to those allocations.
+     *
+     * @param \Pterodactyl\Models\Node $node
+     * @param bool $refresh
+     * @return \Pterodactyl\Models\Node
      */
-    public function getNodeAllocations($id)
+    public function loadNodeAllocations(Node $node, bool $refresh = false): Node
     {
-        $instance = $this->getBuilder()->find($id, $this->getColumns());
-
-        if (! $instance) {
-            throw new RecordNotFoundException();
-        }
-
-        $instance->setRelation(
-            'allocations',
-            $instance->allocations()->orderBy('ip', 'asc')->orderBy('port', 'asc')->with('server')->paginate(50)
+        $node->setRelation('allocations',
+            $node->allocations()
+                ->orderByRaw('server_id IS NOT NULL DESC, server_id IS NULL')
+                ->orderByRaw('INET_ATON(ip) ASC')
+                ->orderBy('port', 'asc')
+                ->with('server:id,name')
+                ->paginate(50)
         );
 
-        return $instance;
+        return $node;
     }
 
     /**
-     * {@inheritdoc}
+     * Return a collection of nodes for all locations to use in server creation UI.
+     *
+     * @return \Illuminate\Support\Collection
      */
-    public function getNodeServers($id)
+    public function getNodesForServerCreation(): Collection
     {
-        $instance = $this->getBuilder()->with('servers.user', 'servers.nest', 'servers.egg')
-            ->find($id, $this->getColumns());
-
-        if (! $instance) {
-            throw new RecordNotFoundException();
-        }
-
-        return $instance;
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getNodesForServerCreation()
-    {
-        $instance = $this->getBuilder()->with('allocations')->get();
-
-        return $instance->map(function ($item) {
-            $filtered = $item->allocations->where('server_id', null)->map(function ($map) {
+        return $this->getBuilder()->with('allocations')->get()->map(function (Node $item) {
+            $filtered = $item->getRelation('allocations')->where('server_id', null)->map(function ($map) {
                 return collect($map)->only(['id', 'ip', 'port']);
             });
 
@@ -150,5 +153,22 @@ class NodeRepository extends EloquentRepository implements NodeRepositoryInterfa
                 'allocations' => $item->ports,
             ];
         })->values();
+    }
+
+    /**
+     * Returns a node with the given id with the Node's resource usage.
+     *
+     * @param int $node_id
+     * @return Node
+     */
+    public function getNodeWithResourceUsage(int $node_id): Node
+    {
+        $instance = $this->getBuilder()
+            ->select(['nodes.id', 'nodes.fqdn', 'nodes.scheme', 'nodes.daemon_token', 'nodes.daemonListen', 'nodes.memory', 'nodes.disk', 'nodes.memory_overallocate', 'nodes.disk_overallocate'])
+            ->selectRaw('IFNULL(SUM(servers.memory), 0) as sum_memory, IFNULL(SUM(servers.disk), 0) as sum_disk')
+            ->leftJoin('servers', 'servers.node_id', '=', 'nodes.id')
+            ->where('nodes.id', $node_id);
+
+        return $instance->first();
     }
 }

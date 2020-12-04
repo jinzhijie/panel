@@ -2,23 +2,20 @@
 
 namespace Pterodactyl\Http\Controllers\Auth;
 
-use Pterodactyl\Models\User;
+use Illuminate\Support\Str;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Contracts\Hashing\Hasher;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Contracts\Events\Dispatcher;
+use Pterodactyl\Exceptions\DisplayException;
 use Pterodactyl\Http\Controllers\Controller;
 use Illuminate\Foundation\Auth\ResetsPasswords;
+use Pterodactyl\Http\Requests\Auth\ResetPasswordRequest;
+use Pterodactyl\Contracts\Repository\UserRepositoryInterface;
 
 class ResetPasswordController extends Controller
 {
-    /*
-    |--------------------------------------------------------------------------
-    | Password Reset Controller
-    |--------------------------------------------------------------------------
-    |
-    | This controller is responsible for handling password reset requests
-    | and uses a simple trait to include this behavior. You're free to
-    | explore this trait and override any methods you wish to tweak.
-    |
-    */
-
     use ResetsPasswords;
 
     /**
@@ -29,24 +26,108 @@ class ResetPasswordController extends Controller
     public $redirectTo = '/';
 
     /**
-     * Create a new controller instance.
+     * @var bool
      */
-    public function __construct()
+    protected $hasTwoFactor = false;
+
+    /**
+     * @var \Illuminate\Contracts\Events\Dispatcher
+     */
+    private $dispatcher;
+
+    /**
+     * @var \Illuminate\Contracts\Hashing\Hasher
+     */
+    private $hasher;
+
+    /**
+     * @var \Pterodactyl\Contracts\Repository\UserRepositoryInterface
+     */
+    private $userRepository;
+
+    /**
+     * ResetPasswordController constructor.
+     *
+     * @param \Illuminate\Contracts\Events\Dispatcher $dispatcher
+     * @param \Illuminate\Contracts\Hashing\Hasher $hasher
+     * @param \Pterodactyl\Contracts\Repository\UserRepositoryInterface $userRepository
+     */
+    public function __construct(Dispatcher $dispatcher, Hasher $hasher, UserRepositoryInterface $userRepository)
     {
-        $this->middleware('guest');
+        $this->dispatcher = $dispatcher;
+        $this->hasher = $hasher;
+        $this->userRepository = $userRepository;
     }
 
     /**
-     * Return the rules used when validating password reset.
+     * Reset the given user's password.
      *
-     * @return array
+     * @param \Pterodactyl\Http\Requests\Auth\ResetPasswordRequest $request
+     * @return \Illuminate\Http\JsonResponse
+     *
+     * @throws \Pterodactyl\Exceptions\DisplayException
      */
-    protected function rules()
+    public function __invoke(ResetPasswordRequest $request): JsonResponse
     {
-        return [
-            'token' => 'required',
-            'email' => 'required|email',
-            'password' => 'required|confirmed|' . User::PASSWORD_RULES,
-        ];
+        // Here we will attempt to reset the user's password. If it is successful we
+        // will update the password on an actual user model and persist it to the
+        // database. Otherwise we will parse the error and return the response.
+        $response = $this->broker()->reset(
+            $this->credentials($request), function ($user, $password) {
+                $this->resetPassword($user, $password);
+            }
+        );
+
+        // If the password was successfully reset, we will redirect the user back to
+        // the application's home authenticated view. If there is an error we can
+        // redirect them back to where they came from with their error message.
+        if ($response === Password::PASSWORD_RESET) {
+            return $this->sendResetResponse();
+        }
+
+        throw new DisplayException(trans($response));
+    }
+
+    /**
+     * Reset the given user's password. If the user has two-factor authentication enabled on their
+     * account do not automatically log them in. In those cases, send the user back to the login
+     * form with a note telling them their password was changed and to log back in.
+     *
+     * @param \Illuminate\Contracts\Auth\CanResetPassword|\Pterodactyl\Models\User $user
+     * @param string $password
+     *
+     * @throws \Pterodactyl\Exceptions\Model\DataValidationException
+     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     */
+    protected function resetPassword($user, $password)
+    {
+        $user = $this->userRepository->update($user->id, [
+            'password' => $this->hasher->make($password),
+            $user->getRememberTokenName() => Str::random(60),
+        ]);
+
+        $this->dispatcher->dispatch(new PasswordReset($user));
+
+        // If the user is not using 2FA log them in, otherwise skip this step and force a
+        // fresh login where they'll be prompted to enter a token.
+        if (! $user->use_totp) {
+            $this->guard()->login($user);
+        }
+
+        $this->hasTwoFactor = $user->use_totp;
+    }
+
+    /**
+     * Send a successful password reset response back to the callee.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    protected function sendResetResponse(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'redirect_to' => $this->redirectTo,
+            'send_to_login' => $this->hasTwoFactor,
+        ]);
     }
 }

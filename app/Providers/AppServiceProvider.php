@@ -10,11 +10,9 @@ use Pterodactyl\Models\Subuser;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Pterodactyl\Observers\UserObserver;
+use Pterodactyl\Extensions\Themes\Theme;
 use Pterodactyl\Observers\ServerObserver;
 use Pterodactyl\Observers\SubuserObserver;
-use Barryvdh\LaravelIdeHelper\IdeHelperServiceProvider;
-use DaneEveritt\LoginNotifications\NotificationServiceProvider;
-use Barryvdh\Debugbar\ServiceProvider as DebugbarServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -34,18 +32,19 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register any application services.
+     * Register application service providers.
      */
     public function register()
     {
-        if ($this->app->environment() !== 'production') {
-            $this->app->register(DebugbarServiceProvider::class);
-            $this->app->register(IdeHelperServiceProvider::class);
+        // Only load the settings service provider if the environment
+        // is configured to allow it.
+        if (! config('pterodactyl.load_environment_only', false) && $this->app->environment() !== 'testing') {
+            $this->app->register(SettingsServiceProvider::class);
         }
 
-        if (config('pterodactyl.auth.notifications')) {
-            $this->app->register(NotificationServiceProvider::class);
-        }
+        $this->app->singleton('extensions.themes', function () {
+            return new Theme;
+        });
     }
 
     /**

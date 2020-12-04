@@ -1,30 +1,27 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Contracts\Repository;
+
+use Illuminate\Support\Collection;
 
 interface AllocationRepositoryInterface extends RepositoryInterface
 {
     /**
-     * Set an array of allocation IDs to be assigned to a specific server.
-     *
-     * @param int|null $server
-     * @param array    $ids
-     * @return int
-     */
-    public function assignAllocationsToServer($server, array $ids);
-
-    /**
-     * Return all of the allocations for a specific node.
+     * Return all of the allocations that exist for a node that are not currently
+     * allocated.
      *
      * @param int $node
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return array
      */
-    public function getAllocationsForNode($node);
+    public function getUnassignedAllocationIds(int $node): array;
+
+    /**
+     * Return a single allocation from those meeting the requirements.
+     *
+     * @param array $nodes
+     * @param array $ports
+     * @param bool $dedicated
+     * @return \Pterodactyl\Models\Allocation|null
+     */
+    public function getRandomAllocation(array $nodes, array $ports, bool $dedicated = false);
 }

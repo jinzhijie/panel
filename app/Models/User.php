@@ -1,39 +1,64 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Models;
 
-use Sofa\Eloquence\Eloquence;
-use Sofa\Eloquence\Validable;
+use Pterodactyl\Rules\Username;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\Rules\In;
 use Illuminate\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Notifications\Notifiable;
-use Sofa\Eloquence\Contracts\CleansAttributes;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Auth\Passwords\CanResetPassword;
+use Pterodactyl\Traits\Helpers\AvailableLanguages;
 use Illuminate\Foundation\Auth\Access\Authorizable;
-use Sofa\Eloquence\Contracts\Validable as ValidableContract;
 use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
 use Illuminate\Contracts\Auth\Access\Authorizable as AuthorizableContract;
 use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Pterodactyl\Notifications\SendPasswordReset as ResetPasswordNotification;
 
+/**
+ * @property int $id
+ * @property string|null $external_id
+ * @property string $uuid
+ * @property string $username
+ * @property string $email
+ * @property string|null $name_first
+ * @property string|null $name_last
+ * @property string $password
+ * @property string|null $remeber_token
+ * @property string $language
+ * @property bool $root_admin
+ * @property bool $use_totp
+ * @property string|null $totp_secret
+ * @property \Carbon\Carbon|null $totp_authenticated_at
+ * @property bool $gravatar
+ * @property \Carbon\Carbon $created_at
+ * @property \Carbon\Carbon $updated_at
+ *
+ * @property string $name
+ * @property \Pterodactyl\Models\ApiKey[]|\Illuminate\Database\Eloquent\Collection $apiKeys
+ * @property \Pterodactyl\Models\Server[]|\Illuminate\Database\Eloquent\Collection $servers
+ * @property \Pterodactyl\Models\RecoveryToken[]|\Illuminate\Database\Eloquent\Collection $recoveryTokens
+ */
 class User extends Model implements
     AuthenticatableContract,
     AuthorizableContract,
-    CanResetPasswordContract,
-    CleansAttributes,
-    ValidableContract
+    CanResetPasswordContract
 {
-    use Authenticatable, Authorizable, CanResetPassword, Eloquence, Notifiable, Validable;
+    use Authenticatable;
+    use Authorizable;
+    use AvailableLanguages;
+    use CanResetPassword;
+    use Notifiable;
 
     const USER_LEVEL_USER = 0;
     const USER_LEVEL_ADMIN = 1;
+
+    /**
+     * The resource name for this model when it is transformed into an
+     * API representation using fractal.
+     */
+    const RESOURCE_NAME = 'user';
 
     /**
      * Level of servers to display when using access() on a user.
@@ -55,6 +80,7 @@ class User extends Model implements
      * @var array
      */
     protected $fillable = [
+        'external_id',
         'username',
         'email',
         'name_first',
@@ -63,6 +89,7 @@ class User extends Model implements
         'language',
         'use_totp',
         'totp_secret',
+        'totp_authenticated_at',
         'gravatar',
         'root_admin',
     ];
@@ -79,24 +106,16 @@ class User extends Model implements
     ];
 
     /**
+     * @var array
+     */
+    protected $dates = ['totp_authenticated_at'];
+
+    /**
      * The attributes excluded from the model's JSON form.
      *
      * @var array
      */
-    protected $hidden = ['password', 'remember_token', 'totp_secret'];
-
-    /**
-     * Parameters for search querying.
-     *
-     * @var array
-     */
-    protected $searchableColumns = [
-        'email' => 10,
-        'username' => 9,
-        'name_first' => 6,
-        'name_last' => 6,
-        'uuid' => 1,
-    ];
+    protected $hidden = ['password', 'remember_token', 'totp_secret', 'totp_authenticated_at'];
 
     /**
      * Default values for specific fields in the database.
@@ -104,6 +123,7 @@ class User extends Model implements
      * @var array
      */
     protected $attributes = [
+        'external_id' => null,
         'root_admin' => false,
         'language' => 'en',
         'use_totp' => false,
@@ -111,34 +131,47 @@ class User extends Model implements
     ];
 
     /**
-     * Rules verifying that the data passed in forms is valid and meets application logic rules.
-     *
-     * @var array
-     */
-    protected static $applicationRules = [
-        'email' => 'required',
-        'username' => 'required',
-        'name_first' => 'required',
-        'name_last' => 'required',
-        'password' => 'sometimes',
-    ];
-
-    /**
      * Rules verifying that the data being stored matches the expectations of the database.
      *
      * @var array
      */
-    protected static $dataIntegrityRules = [
-        'email' => 'email|unique:users,email',
-        'username' => 'alpha_dash|between:1,255|unique:users,username',
-        'name_first' => 'string|between:1,255',
-        'name_last' => 'string|between:1,255',
-        'password' => 'nullable|string',
+    public static $validationRules = [
+        'uuid' => 'required|string|size:36|unique:users,uuid',
+        'email' => 'required|email|between:1,191|unique:users,email',
+        'external_id' => 'sometimes|nullable|string|max:191|unique:users,external_id',
+        'username' => 'required|between:1,191|unique:users,username',
+        'name_first' => 'required|string|between:1,191',
+        'name_last' => 'required|string|between:1,191',
+        'password' => 'sometimes|nullable|string',
         'root_admin' => 'boolean',
-        'language' => 'string|between:2,5',
+        'language' => 'string',
         'use_totp' => 'boolean',
         'totp_secret' => 'nullable|string',
     ];
+
+    /**
+     * Implement language verification by overriding Eloquence's gather
+     * rules function.
+     */
+    public static function getRules()
+    {
+        $rules = parent::getRules();
+
+        $rules['language'][] = new In(array_keys((new self)->getAvailableLanguages()));
+        $rules['username'][] = new Username;
+
+        return $rules;
+    }
+
+    /**
+     * Return the user model in a format that can be passed over to Vue templates.
+     *
+     * @return array
+     */
+    public function toVueObject(): array
+    {
+        return (new Collection($this->toArray()))->except(['id', 'external_id'])->toArray();
+    }
 
     /**
      * Send the password reset notification.
@@ -151,33 +184,23 @@ class User extends Model implements
     }
 
     /**
-     * Store the username as a lowecase string.
+     * Store the username as a lowercase string.
      *
      * @param string $value
      */
-    public function setUsernameAttribute($value)
+    public function setUsernameAttribute(string $value)
     {
-        $this->attributes['username'] = strtolower($value);
+        $this->attributes['username'] = mb_strtolower($value);
     }
 
     /**
-     * Return a concated result for the accounts full name.
+     * Return a concatenated result for the accounts full name.
      *
      * @return string
      */
     public function getNameAttribute()
     {
-        return $this->name_first . ' ' . $this->name_last;
-    }
-
-    /**
-     * Returns all permissions that a user has.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough
-     */
-    public function permissions()
-    {
-        return $this->hasManyThrough(Permission::class, Subuser::class);
+        return trim($this->name_first . ' ' . $this->name_last);
     }
 
     /**
@@ -191,22 +214,36 @@ class User extends Model implements
     }
 
     /**
-     * Return all servers that user is listed as a subuser of directly.
-     *
      * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
-    public function subuserOf()
+    public function apiKeys()
     {
-        return $this->hasMany(Subuser::class);
+        return $this->hasMany(ApiKey::class)
+            ->where('key_type', ApiKey::TYPE_ACCOUNT);
     }
 
     /**
-     * Return all of the daemon keys that a user belongs to.
-     *
      * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
-    public function keys()
+    public function recoveryTokens()
     {
-        return $this->hasMany(DaemonKey::class);
+        return $this->hasMany(RecoveryToken::class);
+    }
+
+    /**
+     * Returns all of the servers that a user can access by way of being the owner of the
+     * server, or because they are assigned as a subuser for that server.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function accessibleServers()
+    {
+        return Server::query()
+            ->select('servers.*')
+            ->leftJoin('subusers', 'subusers.server_id', '=', 'servers.id')
+            ->where(function (Builder $builder) {
+                $builder->where('servers.owner_id', $this->id)->orWhere('subusers.user_id', $this->id);
+            })
+            ->groupBy('servers.id');
     }
 }

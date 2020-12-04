@@ -1,8 +1,5 @@
 coverage:
   status:
-    project:
-      default:
-        target: 35
-        threshold: 1
-comment:
-  layout: "diff"
+    project: off
+    patch: off
+comment: false

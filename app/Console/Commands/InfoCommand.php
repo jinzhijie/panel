@@ -38,7 +38,7 @@ class InfoCommand extends Command
     /**
      * VersionCommand constructor.
      *
-     * @param \Illuminate\Contracts\Config\Repository              $config
+     * @param \Illuminate\Contracts\Config\Repository $config
      * @param \Pterodactyl\Services\Helpers\SoftwareVersionService $versionService
      */
     public function __construct(ConfigRepository $config, SoftwareVersionService $versionService)
@@ -84,7 +84,7 @@ class InfoCommand extends Command
             ['Host', $this->config->get("database.connections.{$driver}.host")],
             ['Port', $this->config->get("database.connections.{$driver}.port")],
             ['Database', $this->config->get("database.connections.{$driver}.database")],
-            ['Usernamne', $this->config->get("database.connections.{$driver}.username")],
+            ['Username', $this->config->get("database.connections.{$driver}.username")],
         ], 'compact');
 
         $this->output->title('Email Configuration');

@@ -1,128 +1,89 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Contracts\Repository;
 
 use Pterodactyl\Models\Server;
-use Pterodactyl\Contracts\Repository\Attributes\SearchableInterface;
+use Illuminate\Support\Collection;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
-interface ServerRepositoryInterface extends RepositoryInterface, SearchableInterface
+interface ServerRepositoryInterface extends RepositoryInterface
 {
     /**
-     * Returns a listing of all servers that exist including relationships.
+     * Load the egg relations onto the server model.
      *
-     * @param int|null $paginate
-     * @return mixed
+     * @param \Pterodactyl\Models\Server $server
+     * @param bool $refresh
+     * @return \Pterodactyl\Models\Server
      */
-    public function getAllServers($paginate);
+    public function loadEggRelations(Server $server, bool $refresh = false): Server;
 
     /**
      * Return a collection of servers with their associated data for rebuild operations.
      *
      * @param int|null $server
      * @param int|null $node
-     * @return \Illuminate\Database\Eloquent\Collection
+     * @return \Illuminate\Support\Collection
      */
-    public function getDataForRebuild($server = null, $node = null);
+    public function getDataForRebuild(int $server = null, int $node = null): Collection;
 
     /**
-     * Load the egg relations onto the server model.
+     * Return a collection of servers with their associated data for reinstall operations.
      *
-     * @param \Pterodactyl\Models\Server $server
-     * @param bool                       $refresh
-     * @return \Pterodactyl\Models\Server
+     * @param int|null $server
+     * @param int|null $node
+     * @return \Illuminate\Support\Collection
      */
-    public function loadEggRelations(Server $server, bool $refresh = false): Server;
+    public function getDataForReinstall(int $server = null, int $node = null): Collection;
 
     /**
      * Return a server model and all variables associated with the server.
      *
      * @param int $id
-     * @return mixed
+     * @return \Pterodactyl\Models\Server
      *
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function findWithVariables($id);
-
-    /**
-     * Return all of the server variables possible and default to the variable
-     * default if there is no value defined for the specific server requested.
-     *
-     * @param int  $id
-     * @param bool $returnAsObject
-     * @return array|object
-     *
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
-     */
-    public function getVariablesWithValues($id, $returnAsObject = false);
+    public function findWithVariables(int $id): Server;
 
     /**
      * Get the primary allocation for a given server. If a model is passed into
      * the function, load the allocation relationship onto it. Otherwise, find and
      * return the server from the database.
      *
-     * @param int|\Pterodactyl\Models\Server $server
-     * @param bool                           $refresh
+     * @param \Pterodactyl\Models\Server $server
+     * @param bool $refresh
      * @return \Pterodactyl\Models\Server
-     *
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function getPrimaryAllocation($server, bool $refresh = false): Server;
+    public function getPrimaryAllocation(Server $server, bool $refresh = false): Server;
 
     /**
      * Return enough data to be used for the creation of a server via the daemon.
      *
      * @param \Pterodactyl\Models\Server $server
-     * @param bool                       $refresh
+     * @param bool $refresh
      * @return \Pterodactyl\Models\Server
      */
     public function getDataForCreation(Server $server, bool $refresh = false): Server;
 
     /**
-     * Return a server as well as associated databases and their hosts.
+     * Load associated databases onto the server model.
      *
-     * @param int $id
-     * @return mixed
-     *
-     * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
+     * @param \Pterodactyl\Models\Server $server
+     * @param bool $refresh
+     * @return \Pterodactyl\Models\Server
      */
-    public function getWithDatabases($id);
+    public function loadDatabaseRelations(Server $server, bool $refresh = false): Server;
 
     /**
      * Get data for use when updating a server on the Daemon. Returns an array of
-     * the egg and pack UUID which are used for build and rebuild. Only loads relations
+     * the egg which is used for build and rebuild. Only loads relations
      * if they are missing, or refresh is set to true.
      *
      * @param \Pterodactyl\Models\Server $server
-     * @param bool                       $refresh
+     * @param bool $refresh
      * @return array
      */
     public function getDaemonServiceData(Server $server, bool $refresh = false): array;
-
-    /**
-     * Return an array of server IDs that a given user can access based on owner and subuser permissions.
-     *
-     * @param int $user
-     * @return array
-     */
-    public function getUserAccessServers($user);
-
-    /**
-     * Return a paginated list of servers that a user can access at a given level.
-     *
-     * @param int    $user
-     * @param string $level
-     * @param bool   $admin
-     * @param array  $relations
-     * @return \Illuminate\Pagination\LengthAwarePaginator
-     */
-    public function filterUserAccessServers($user, $admin = false, $level = 'all', array $relations = []);
 
     /**
      * Return a server by UUID.
@@ -132,5 +93,31 @@ interface ServerRepositoryInterface extends RepositoryInterface, SearchableInter
      *
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function getByUuid($uuid);
+    public function getByUuid(string $uuid): Server;
+
+    /**
+     * Check if a given UUID and UUID-Short string are unique to a server.
+     *
+     * @param string $uuid
+     * @param string $short
+     * @return bool
+     */
+    public function isUniqueUuidCombo(string $uuid, string $short): bool;
+
+    /**
+     * Get the amount of servers that are suspended.
+     *
+     * @return int
+     */
+    public function getSuspendedServersCount(): int;
+
+    /**
+     * Returns all of the servers that exist for a given node in a paginated response.
+     *
+     * @param int $node
+     * @param int $limit
+     *
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
+     */
+    public function loadAllServersForNode(int $node, int $limit): LengthAwarePaginator;
 }

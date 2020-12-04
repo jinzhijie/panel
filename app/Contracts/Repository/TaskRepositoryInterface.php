@@ -1,13 +1,8 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Pterodactyl\Contracts\Repository;
+
+use Pterodactyl\Models\Task;
 
 interface TaskRepositoryInterface extends RepositoryInterface
 {
@@ -19,14 +14,14 @@ interface TaskRepositoryInterface extends RepositoryInterface
      *
      * @throws \Pterodactyl\Exceptions\Repository\RecordNotFoundException
      */
-    public function getTaskWithServer($id);
+    public function getTaskForJobProcess(int $id): Task;
 
     /**
      * Returns the next task in a schedule.
      *
-     * @param int $schedule the ID of the schedule to select the next task from
-     * @param int $index    the index of the current task
-     * @return null|\Pterodactyl\Models\Task
+     * @param int $schedule
+     * @param int $index
+     * @return \Pterodactyl\Models\Task|null
      */
-    public function getNextTask($schedule, $index);
+    public function getNextTask(int $schedule, int $index);
 }

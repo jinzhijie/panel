@@ -15,7 +15,7 @@ use Pterodactyl\Contracts\Repository\EggRepositoryInterface;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Pterodactyl\Exceptions\Service\Egg\NoParentConfigurationFoundException;
 
-// When a mommy and a daddy pterodactyl really like eachother...
+// When a mommy and a daddy pterodactyl really like each other...
 class EggCreationService
 {
     /**
@@ -31,7 +31,7 @@ class EggCreationService
     /**
      * EggCreationService constructor.
      *
-     * @param \Illuminate\Contracts\Config\Repository                  $config
+     * @param \Illuminate\Contracts\Config\Repository $config
      * @param \Pterodactyl\Contracts\Repository\EggRepositoryInterface $repository
      */
     public function __construct(ConfigRepository $config, EggRepositoryInterface $repository)

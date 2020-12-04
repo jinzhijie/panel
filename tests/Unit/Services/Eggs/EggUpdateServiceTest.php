@@ -1,15 +1,7 @@
 <?php
-/**
- * Pterodactyl - Panel
- * Copyright (c) 2015 - 2017 Dane Everitt <dane@daneeveritt.com>.
- *
- * This software is licensed under the terms of the MIT license.
- * https://opensource.org/licenses/MIT
- */
 
 namespace Tests\Unit\Services\Services\Options;
 
-use Exception;
 use Mockery as m;
 use Tests\TestCase;
 use Pterodactyl\Models\Egg;
@@ -38,11 +30,11 @@ class EggUpdateServiceTest extends TestCase
     /**
      * Setup tests.
      */
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
-        $this->model = factory(Egg::class)->make();
+        $this->model = factory(Egg::class)->make(['id' => 123]);
         $this->repository = m::mock(EggRepositoryInterface::class);
 
         $this->service = new EggUpdateService($this->repository);
@@ -53,7 +45,7 @@ class EggUpdateServiceTest extends TestCase
      */
     public function testEggIsUpdatedWhenNoConfigFromIsProvided()
     {
-        $this->repository->shouldReceive('withoutFresh->update')
+        $this->repository->shouldReceive('withoutFreshModel->update')
             ->with($this->model->id, ['test_field' => 'field_value'])->once()->andReturnNull();
 
         $this->service->handle($this->model, ['test_field' => 'field_value']);
@@ -71,7 +63,7 @@ class EggUpdateServiceTest extends TestCase
             ['id', '=', 1],
         ])->once()->andReturn(1);
 
-        $this->repository->shouldReceive('withoutFresh->update')
+        $this->repository->shouldReceive('withoutFreshModel->update')
             ->with($this->model->id, ['config_from' => 1])->once()->andReturnNull();
 
         $this->service->handle($this->model, ['config_from' => 1]);
@@ -95,19 +87,5 @@ class EggUpdateServiceTest extends TestCase
             $this->assertInstanceOf(NoParentConfigurationFoundException::class, $exception);
             $this->assertEquals(trans('exceptions.nest.egg.must_be_child'), $exception->getMessage());
         }
-    }
-
-    /**
-     * Test that an integer linking to a model can be passed in place of the Egg model.
-     */
-    public function testIntegerCanBePassedInPlaceOfModel()
-    {
-        $this->repository->shouldReceive('find')->with($this->model->id)->once()->andReturn($this->model);
-        $this->repository->shouldReceive('withoutFresh->update')
-            ->with($this->model->id, ['test_field' => 'field_value'])->once()->andReturnNull();
-
-        $this->service->handle($this->model->id, ['test_field' => 'field_value']);
-
-        $this->assertTrue(true);
     }
 }
