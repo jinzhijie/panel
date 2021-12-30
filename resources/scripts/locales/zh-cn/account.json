@@ -1,0 +1,61 @@
+{
+  "2fa": {
+    "dashboard_title": "设置双因素认证",
+    "dashboard_desc_enabled": "双因素认证目前已在你的账户上启用",
+    "dashboard_desc_disabled": "你目前没有在你的账户上启用双因素认证。点击下方按钮开始设置。",
+    "disable_password_desc": "你需要提供你的账户密码以禁用双因素认证。",
+    "forced_title": "需要双因素认证",
+    "forced_desc": "你的账户必须启用双因素认证才能继续。",
+    "setup": {
+      "input_title": "认证器代码",
+      "input_desc": "在扫描 QR 图像后，输入你的认证器设备中的代码。",
+      "qr_alternative_desc": "或者，在你的认证器应用程序中输入以下令牌：",
+      "enabled_title": "双因素认证已启用",
+      "enabled_desc": "您的账户已经启用了双因素认证。如果你失去了对认证器设备的访问权，你将需要使用到下方显示的代码之一，以便访问你的账户。",
+      "store_securely": "<bold>这些代码将不再显示。</bold>请注意，现在请将它们储存在一个安全的存储库中，如密码管理器。"
+    },
+    "validation": {
+      "code_required": "你必须提供一个认证码才能继续。",
+      "code_length": "认证码必须是 6 位数字。"
+    }
+  },
+
+  "api": {
+    "page_title": "账户 API",
+    "create": "创建 API 密钥",
+    "required": "你必须提供一个描述才能继续",
+    "valid": "你的描述必须至少有 4 个字符",
+    "title": "API 密钥",
+    "delete_title": "确认删除密钥",
+    "delete_button": "是的，删除密钥",
+    "delete_desc": "请确认是否删除该密钥",
+    "no_keys": "该账户不存在 API 密钥",
+    "last_used": "上次使用： ",
+    "new_title": "你的 API 密钥",
+    "new_desc": "你所请求的 API 密钥显示在下方。请将其保存在一个安全的地方，它将不会再被显示。",
+    "key_desc": "你确定要删除这个 API 密钥吗？所有使用它的请求将立即失效且失败。",
+    "allowed_ips_title": "允许的 IPs",
+    "allowed_ips_desc": "留空以允许任何 IP 地址使用此 API 密钥，否则请提供每个 IP 地址，每行一个。"
+  },
+
+  "password": {
+    "update": "更新密码",
+    "required": "你必须提供你目前的密码才能继续。",
+    "confirm": "确认密码",
+    "confirm_failed": "你两次输入的密码不一致。",
+    "current": "当前密码",
+    "new": "新密码",
+    "new_desc": "你的新密码应该至少有 8 个字符，并且是本网站独有的。",
+    "new_confirm": "确认新密码",
+    "valid": "你的新密码必须至少有 8 个字符"
+  },
+
+  "email": {
+    "update": "更新电子邮箱地址",
+    "updated": "你的主电子邮箱地址已经更新。",
+    "required": "你必须提供一个电子邮箱地址才能继续",
+    "valid": "你必须提供一个有效的电子邮箱地址才能继续"
+  },
+  
+  "page_title": "账户概览"
+}

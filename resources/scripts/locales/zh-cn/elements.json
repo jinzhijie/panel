@@ -1,0 +1,19 @@
+{
+  "enable": "启用",
+  "disable": "禁用",
+  "description": "描述",
+  "create": "创建",
+  "close": "关闭",
+  "setup": "设置",
+  "email": "电子邮箱",
+  "loading": "加载中...",
+  "never": "从不",
+  "error": "错误",
+  "cancel": "取消",
+  "password": "密码",
+  "continue": "继续",
+  "error_long": "应用程序在渲染该视图时遇到了一个错误。请尝试刷新该页面。",
+  "copied_on_click": "已将 {{text}} 复制到剪贴板。",
+  "settings": "设置",
+  "api_credentials": "API 凭证"
+}
